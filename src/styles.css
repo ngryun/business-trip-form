@@ -106,18 +106,196 @@ html, body {
   border-color: transparent;
 }
 .datetime-picker {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 72px 72px;
-  gap: 6px;
+  position: relative;
   width: 100%;
 }
 .form-pane .datetime-picker {
   margin-top: 4px;
 }
-.form-pane .datetime-picker input,
-.form-pane .datetime-picker select {
-  margin-top: 0;
+.datetime-picker__trigger {
+  width: 100%;
+  min-height: 32px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  align-items: center;
+  padding: 0;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  color: #6b7280;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  overflow: hidden;
+}
+.datetime-picker__trigger:hover {
+  background: #f9fafb;
+}
+.datetime-picker__trigger:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: -1px;
+  border-color: transparent;
+}
+.datetime-picker__trigger.has-value {
+  color: #111827;
+}
+.datetime-picker__display {
   min-width: 0;
+  padding: 6px 8px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.datetime-picker__icon {
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid #e5e7eb;
+  color: #374151;
+  font-size: 15px;
+}
+.datetime-picker__panel {
+  position: absolute;
+  z-index: 90;
+  top: calc(100% + 6px);
+  left: 0;
+  width: min(520px, calc(100vw - 32px));
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+  max-height: min(560px, calc(100vh - 88px));
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
+}
+.form-pane .datetime-picker__panel {
+  position: static;
+  width: 100%;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-top: 6px;
+  padding: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+.form-pane .datetime-time {
+  gap: 7px;
+}
+.form-pane .datetime-calendar__weekdays span {
+  height: 16px;
+}
+.form-pane .datetime-calendar__day {
+  height: 24px;
+  aspect-ratio: auto;
+}
+.form-pane .datetime-time__buttons {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 3px;
+}
+.form-pane .datetime-time__button {
+  height: 24px;
+  font-size: 11px;
+}
+.datetime-picker__panel[hidden] {
+  display: none;
+}
+.datetime-picker--inline .datetime-picker__panel {
+  position: static;
+  width: 100%;
+  box-shadow: none;
+}
+.datetime-calendar__header {
+  display: grid;
+  grid-template-columns: 32px 1fr 32px;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.datetime-calendar__month {
+  font-size: 13px;
+  font-weight: 700;
+  color: #111827;
+  text-align: center;
+}
+.datetime-calendar__nav,
+.datetime-calendar__day,
+.datetime-time__button {
+  min-width: 0;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #111827;
+  cursor: pointer;
+  font-family: inherit;
+}
+.datetime-calendar__nav {
+  width: 32px;
+  height: 30px;
+  border-radius: 4px;
+  font-size: 18px;
+  line-height: 1;
+}
+.datetime-calendar__nav:hover,
+.datetime-calendar__day:hover,
+.datetime-time__button:hover {
+  background: #f3f4f6;
+}
+.datetime-calendar__weekdays,
+.datetime-calendar__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.datetime-calendar__weekdays {
+  margin-bottom: 4px;
+}
+.datetime-calendar__weekdays span {
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7280;
+}
+.datetime-calendar__day {
+  aspect-ratio: 1;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.datetime-calendar__day.is-today {
+  border-color: #2563eb;
+}
+.datetime-calendar__day.is-selected,
+.datetime-time__button.is-selected {
+  background: #2563eb;
+  border-color: #1d4ed8;
+  color: #ffffff;
+}
+.datetime-time {
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 10px;
+  min-width: 0;
+}
+.datetime-time__title {
+  margin-bottom: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #374151;
+}
+.datetime-time__buttons {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+.datetime-time__button {
+  height: 28px;
+  border-radius: 4px;
+  font-size: 12px;
 }
 
 .actions {
@@ -196,7 +374,7 @@ html, body {
     transition: transform 0.2s ease;
     border-right: 1px solid #e5e7eb;
     box-shadow: 4px 0 16px rgba(0,0,0,0.1);
-    width: min(380px, 90vw);
+    width: 100vw;
     visibility: visible;
     padding: 16px;
   }
@@ -210,7 +388,7 @@ html, body {
   position: fixed;
   z-index: 1000;
   min-width: 220px;
-  max-width: min(360px, 90vw);
+  max-width: min(560px, 92vw);
   background: #ffffff;
   border: 1px solid #d1d5db;
   border-radius: 8px;
@@ -245,21 +423,6 @@ html, body {
 .field-popover__input.datetime-picker:focus {
   outline: 0;
 }
-.field-popover .datetime-picker input,
-.field-popover .datetime-picker select {
-  min-width: 0;
-  padding: 6px 8px;
-  border: 1px solid #d1d5db;
-  border-radius: 4px;
-  font-size: 14px;
-  font-family: inherit;
-}
-.field-popover .datetime-picker input:focus,
-.field-popover .datetime-picker select:focus {
-  outline: 2px solid #2563eb;
-  outline-offset: -1px;
-  border-color: transparent;
-}
 .field-popover__buttons {
   display: flex;
   gap: 6px;
@@ -287,4 +450,41 @@ html, body {
   .app-body { grid-template-columns: 1fr; }
   .preview-pane { background: #ffffff; overflow: visible; }
   #scroll-container { overflow: visible; height: auto; }
+}
+
+@media (max-width: 560px) {
+  .datetime-picker__panel {
+    width: 100%;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 8px;
+  }
+  .field-popover .datetime-picker__panel {
+    position: static;
+    width: min(360px, calc(100vw - 24px));
+  }
+  .datetime-calendar__header {
+    margin-bottom: 6px;
+  }
+  .datetime-calendar__weekdays span {
+    height: 16px;
+  }
+  .datetime-calendar__day {
+    height: 23px;
+    aspect-ratio: auto;
+  }
+  .datetime-time {
+    gap: 7px;
+  }
+  .datetime-time__title {
+    margin-bottom: 4px;
+  }
+  .datetime-time__buttons {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 3px;
+  }
+  .datetime-time__button {
+    height: 24px;
+    font-size: 11px;
+  }
 }

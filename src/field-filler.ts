@@ -92,7 +92,39 @@ export function setFieldValues(
   // 누름틀 안내문구의 글자색(보통 빨강)이 입력값에도 그대로 적용되는 것을 피하려고
   // 채운 필드들의 텍스트 범위에 검정을 덮어쓴다.
   forceBlackOnFields(wasm, filledFieldIds);
+  restoreEmptyFieldGuides(wasm, fields);
   return { applied, missing };
+}
+
+function restoreEmptyFieldGuides(wasm: WasmBridge, fields: FieldMap): void {
+  const latestById = new Map(wasm.getFieldList().map((f) => [f.fieldId, f]));
+  const seen = new Set<number>();
+  for (const [label, entries] of fields) {
+    for (const entry of entries) {
+      if (seen.has(entry.fieldId)) continue;
+      seen.add(entry.fieldId);
+
+      const latest = latestById.get(entry.fieldId);
+      if ((latest?.value ?? entry.value ?? '') !== '') continue;
+
+      try {
+        const props = (wasm as any).getClickHereProps?.(entry.fieldId);
+        if (!props?.ok || props.guide) continue;
+        const name = props.name ?? latest?.name ?? entry.name ?? '';
+        const guide = entry.guide || name || label;
+        if (!guide) continue;
+        (wasm as any).updateClickHereProps?.(
+          entry.fieldId,
+          guide,
+          props.memo ?? '',
+          name,
+          props.editable ?? true,
+        );
+      } catch {
+        // 안내문구 복원 실패는 값 주입 자체를 막지 않는다.
+      }
+    }
+  }
 }
 
 /**

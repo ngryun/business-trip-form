@@ -76,6 +76,30 @@ export function formatDateTimeKR(value: string): string {
   return `${match[1]}. ${match[2]}. ${match[3]}. ${match[4]}:${match[5]}`;
 }
 
+/** 좁은 HWP 누름틀용 datetime 표시 (`5.22 14:00`) */
+export function formatDateTimeCompactKR(value: string): string {
+  const parts = getDateTimeParts(value);
+  if (!parts) return value;
+  return `${Number(parts.month)}.${Number(parts.day)} ${parts.hour}:${parts.minute}`;
+}
+
+/** `시작일시 ~ 종료일시` 한 줄에서 종료일시가 같은 날짜면 시간만 표시 */
+export function formatDateTimeRangeEndKR(value: string, startValue: string): string {
+  const end = getDateTimeParts(value);
+  if (!end) return value;
+
+  const start = getDateTimeParts(startValue);
+  if (
+    start &&
+    start.year === end.year &&
+    start.month === end.month &&
+    start.day === end.day
+  ) {
+    return `${end.hour}:${end.minute}`;
+  }
+  return formatDateTimeCompactKR(value);
+}
+
 /** date 폼 값 (`2026-05-22`) → 한국식 (`2026. 05. 22.`) */
 export function formatDateKR(value: string): string {
   if (!value) return '';
@@ -83,11 +107,21 @@ export function formatDateKR(value: string): string {
   return `${y}. ${m}. ${d}.`;
 }
 
-/** 한국식 (`2026. 05. 22. 14:00`) → datetime-local 입력값 */
-export function parseDateTimeKR(value: string): string {
-  const m = value.match(/(\d{4})\.\s*(\d{2})\.\s*(\d{2})\.\s*(\d{2}):(\d{2})/);
-  if (!m) return '';
-  return normalizeDateTimeLocalStep(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}`);
+/** 한국식 (`2026. 05. 22. 14:00`, `5.22 14:00`, `14:00`) → datetime-local 입력값 */
+export function parseDateTimeKR(value: string, fallbackDateTime = ''): string {
+  const full = value.match(/(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.?\s*(\d{1,2}):(\d{2})/);
+  if (full) return normalizeDateTimeLocalStep(`${full[1]}-${pad2(Number(full[2]))}-${pad2(Number(full[3]))}T${pad2(Number(full[4]))}:${full[5]}`);
+
+  const compact = value.match(/(\d{1,2})\.\s*(\d{1,2})\.?\s*(\d{1,2}):(\d{2})/);
+  if (compact) {
+    const year = getDateTimeParts(fallbackDateTime)?.year ?? String(new Date().getFullYear());
+    return normalizeDateTimeLocalStep(`${year}-${pad2(Number(compact[1]))}-${pad2(Number(compact[2]))}T${pad2(Number(compact[3]))}:${compact[4]}`);
+  }
+
+  const timeOnly = value.match(/^\s*(\d{1,2}):(\d{2})\s*$/);
+  const fallback = getDateTimeParts(fallbackDateTime);
+  if (!timeOnly || !fallback) return '';
+  return normalizeDateTimeLocalStep(`${fallback.year}-${fallback.month}-${fallback.day}T${pad2(Number(timeOnly[1]))}:${timeOnly[2]}`);
 }
 
 /** 한국식 (`2026. 05. 22.`) → date 입력값 */
@@ -101,18 +135,32 @@ export function parseDateKR(value: string): string {
 export function formatForLabel(label: string, rawValue: string): string {
   const cfg = FIELD_CONFIGS[label];
   if (!cfg) return rawValue;
-  if (cfg.type === 'datetime') return formatDateTimeKR(rawValue);
+  if (cfg.type === 'datetime') return formatDateTimeCompactKR(rawValue);
   if (cfg.type === 'date') return formatDateKR(rawValue);
   return rawValue;
 }
 
 /** 누름틀에 들어있는 값을 입력 위젯이 받을 수 있는 형태로 변환 */
-export function parseFromHWP(label: string, hwpValue: string): string {
+export function parseFromHWP(label: string, hwpValue: string, fallbackDateTime = ''): string {
   const cfg = FIELD_CONFIGS[label];
   if (!cfg) return hwpValue;
-  if (cfg.type === 'datetime') return parseDateTimeKR(hwpValue);
+  if (cfg.type === 'datetime') return parseDateTimeKR(hwpValue, fallbackDateTime);
   if (cfg.type === 'date') return parseDateKR(hwpValue);
   return hwpValue;
+}
+
+function getDateTimeParts(value: string): { year: string; month: string; day: string; hour: string; minute: string } | null {
+  if (!value) return null;
+  const normalized = normalizeDateTimeLocalStep(value);
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!match) return null;
+  return {
+    year: match[1],
+    month: match[2],
+    day: match[3],
+    hour: match[4],
+    minute: match[5],
+  };
 }
 
 function pad2(value: number): string {

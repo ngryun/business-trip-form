@@ -13,7 +13,7 @@
 import type { WasmBridge } from '@/core/wasm-bridge';
 import type { CanvasView } from '@/view/canvas-view';
 import type { FieldInfoResult, HitTestResult } from '@/core/types';
-import { FIELD_CONFIGS, formatForLabel, parseFromHWP } from './field-config';
+import { FIELD_CONFIGS, formatDateTimeRangeEndKR, formatForLabel, parseFromHWP } from './field-config';
 import { setFieldValues, type FieldMap } from './field-filler';
 import { closeFieldPopover, isPopoverOpen, showFieldPopover } from './field-popover';
 
@@ -140,19 +140,25 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
 
     const label = findLabelForFieldId(getFields(), fi.fieldId);
     if (!label || !FIELD_CONFIGS[label]) return null;
-    return { fieldId: fi.fieldId, label, pos, fi };
+    const resolvedLabel = resolvePairedDateTimeLabel(label, pos, fi, pageX);
+    return { fieldId: fi.fieldId, label: resolvedLabel, pos, fi };
   }
 
   function openPopoverFor(hit: FieldHit, e: MouseEvent): void {
     const { fieldId, label } = hit;
-    const entry = getFields().get(label)?.find((en) => en.fieldId === fieldId);
-    const initial = parseFromHWP(label, entry?.value ?? '');
+    const entries = getFields().get(label) ?? [];
+    const entry = entries.find((en) => en.fieldId === fieldId) ?? entries[0];
+    const startRaw = getFields().get('시작일시')?.[0]?.value ?? '';
+    const startValue = parseFromHWP('시작일시', startRaw);
+    const initial = parseFromHWP(label, entry?.value ?? '', label === '종료일시' ? startValue : '');
     showFieldPopover({
       label,
       initialValue: initial,
       anchor: { x: e.clientX, y: e.clientY },
       onConfirm: (raw) => {
-        const value = formatForLabel(label, raw);
+        const value = label === '종료일시'
+          ? formatDateTimeRangeEndKR(raw, startValue)
+          : formatForLabel(label, raw);
         if (!value) return; // 빈 값이면 취소처럼 동작
         try {
           // setFieldValues 가 forceBlackOnFields + clearGuide 까지 처리한다
@@ -165,6 +171,20 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
       },
       onCancel: () => undefined,
     });
+  }
+
+  function resolvePairedDateTimeLabel(
+    label: string,
+    pos: HitTestResult,
+    fi: FieldInfoResult,
+    pageX: number,
+  ): string {
+    if (label !== '시작일시' || !getFields().has('종료일시')) return label;
+
+    const rect = getFieldPageRect(pos, fi);
+    if (!rect || rect.width <= 0) return label;
+
+    return pageX >= rect.x + rect.width * 0.62 ? '종료일시' : label;
   }
 
   // ---- 하이라이트 오버레이 ----

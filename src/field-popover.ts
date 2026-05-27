@@ -1,17 +1,17 @@
 /**
  * 미리보기 위에서 누름틀을 클릭했을 때 떠오르는 입력 팝오버.
  *
- * - 라벨에 맞는 위젯(text/datetime-local/date/select/textarea) 렌더링
+ * - 라벨에 맞는 위젯(text/date/select/textarea/일시 선택기) 렌더링
  * - Enter 확정 / Esc 취소 / 외부 클릭 취소 / 자동 포커스
  * - 화면 가장자리에서 잘리지 않도록 위치 보정
  */
 
 import {
-  composeDateTimeLocalValue,
-  DATETIME_HOUR_OPTIONS,
-  DATETIME_MINUTE_OPTIONS,
+  createDateTimePicker,
+  getDateTimePickerValue,
+} from './datetime-picker';
+import {
   FIELD_CONFIGS,
-  splitDateTimeLocal,
   type WidgetConfig,
 } from './field-config';
 
@@ -42,7 +42,7 @@ export function showFieldPopover(args: PopoverArgs): void {
   titleEl.textContent = args.label;
   root.appendChild(titleEl);
 
-  const input = createInput(cfg, args.initialValue);
+  const input = createInput(args.label, cfg, args.initialValue);
   input.classList.add('field-popover__input');
   root.appendChild(input);
 
@@ -115,7 +115,7 @@ export function isPopoverOpen(): boolean {
   return currentPopover !== null;
 }
 
-function createInput(cfg: WidgetConfig, initial: string): HTMLElement {
+function createInput(label: string, cfg: WidgetConfig, initial: string): HTMLElement {
   if (cfg.type === 'select') {
     const sel = document.createElement('select');
     const blank = document.createElement('option');
@@ -138,7 +138,10 @@ function createInput(cfg: WidgetConfig, initial: string): HTMLElement {
     return ta;
   }
   if (cfg.type === 'datetime') {
-    return createDateTimeInput(initial);
+    return createDateTimePicker(initial, {
+      defaultHour: label === '종료일시' ? '18' : '09',
+      inline: true,
+    });
   }
   const inp = document.createElement('input');
   if (cfg.type === 'date') inp.type = 'date';
@@ -149,14 +152,7 @@ function createInput(cfg: WidgetConfig, initial: string): HTMLElement {
 
 function getInputValue(el: HTMLElement): string {
   if (el.classList.contains('datetime-picker')) {
-    const dateInput = el.querySelector<HTMLInputElement>('[data-datetime-date]');
-    const hourSelect = el.querySelector<HTMLSelectElement>('[data-datetime-hour]');
-    const minuteSelect = el.querySelector<HTMLSelectElement>('[data-datetime-minute]');
-    return composeDateTimeLocalValue(
-      dateInput?.value ?? '',
-      hourSelect?.value ?? '',
-      minuteSelect?.value ?? '',
-    );
+    return getDateTimePickerValue(el);
   }
   if (el instanceof HTMLSelectElement || el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
     return el.value;
@@ -164,51 +160,10 @@ function getInputValue(el: HTMLElement): string {
   return '';
 }
 
-function createDateTimeInput(initial: string): HTMLElement {
-  const root = document.createElement('div');
-  root.className = 'datetime-picker';
-
-  const dateInput = document.createElement('input');
-  dateInput.type = 'date';
-  dateInput.dataset.datetimeDate = '';
-  dateInput.setAttribute('aria-label', '일자');
-
-  const hourSelect = document.createElement('select');
-  hourSelect.dataset.datetimeHour = '';
-  hourSelect.setAttribute('aria-label', '시');
-  fillDateTimeSelect(hourSelect, DATETIME_HOUR_OPTIONS, '시', '시');
-
-  const minuteSelect = document.createElement('select');
-  minuteSelect.dataset.datetimeMinute = '';
-  minuteSelect.setAttribute('aria-label', '분');
-  fillDateTimeSelect(minuteSelect, DATETIME_MINUTE_OPTIONS, '분', '분');
-
-  const parsed = splitDateTimeLocal(initial);
-  dateInput.value = parsed.date;
-  hourSelect.value = parsed.hour;
-  minuteSelect.value = parsed.minute;
-
-  root.append(dateInput, hourSelect, minuteSelect);
-  return root;
-}
-
-function fillDateTimeSelect(select: HTMLSelectElement, values: string[], placeholder: string, suffix: string): void {
-  const blank = document.createElement('option');
-  blank.value = '';
-  blank.textContent = placeholder;
-  select.replaceChildren(blank);
-  for (const value of values) {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = `${value}${suffix}`;
-    select.appendChild(option);
-  }
-}
-
 function focusInput(input: HTMLElement): void {
   const target = input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement || input instanceof HTMLSelectElement
     ? input
-    : input.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input, textarea, select');
+    : input.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('button, input, textarea, select');
   if (!target) return;
   target.focus();
   if (target instanceof HTMLInputElement && target.type === 'text') target.select();
