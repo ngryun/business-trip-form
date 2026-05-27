@@ -13,8 +13,8 @@
 import type { WasmBridge } from '@/core/wasm-bridge';
 import type { CanvasView } from '@/view/canvas-view';
 import type { FieldInfoResult, HitTestResult } from '@/core/types';
-import { FIELD_CONFIGS, formatDateTimeRangeEndKR, formatForLabel, parseFromHWP } from './field-config';
-import { setFieldValues, type FieldMap } from './field-filler';
+import { FIELD_CONFIGS, formatDateTimeRange, formatForLabel, parseDateTimeRange, parseFromHWP } from './field-config';
+import { fillDateTimeRange, setFieldValues, type FieldMap } from './field-filler';
 import { closeFieldPopover, isPopoverOpen, showFieldPopover } from './field-popover';
 
 export interface InlineEditDeps {
@@ -146,19 +146,43 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
 
   function openPopoverFor(hit: FieldHit, e: MouseEvent): void {
     const { fieldId, label } = hit;
+    const anchor = { x: e.clientX, y: e.clientY };
+
+    // 시작·종료 일시는 시작일시 누름틀에 범위로 합쳐 있으므로, 한쪽만 편집하고 다시 합쳐 넣는다.
+    if (label === '시작일시' || label === '종료일시') {
+      const rangeRaw = getFields().get('시작일시')?.[0]?.value ?? '';
+      const { start, end } = parseDateTimeRange(rangeRaw);
+      showFieldPopover({
+        label,
+        initialValue: label === '종료일시' ? end : start,
+        anchor,
+        onConfirm: (raw) => {
+          const newRange = label === '종료일시'
+            ? formatDateTimeRange(start, raw)
+            : formatDateTimeRange(raw, end);
+          if (!newRange) return; // 시작 미입력이면 취소처럼 동작
+          try {
+            fillDateTimeRange(wasm, getFields(), newRange);
+          } catch (err) {
+            console.error('[field-interaction] 적용 실패:', err);
+            return;
+          }
+          onAfterEdit(label, newRange);
+        },
+        onCancel: () => undefined,
+      });
+      return;
+    }
+
     const entries = getFields().get(label) ?? [];
     const entry = entries.find((en) => en.fieldId === fieldId) ?? entries[0];
-    const startRaw = getFields().get('시작일시')?.[0]?.value ?? '';
-    const startValue = parseFromHWP('시작일시', startRaw);
-    const initial = parseFromHWP(label, entry?.value ?? '', label === '종료일시' ? startValue : '');
+    const initial = parseFromHWP(label, entry?.value ?? '');
     showFieldPopover({
       label,
       initialValue: initial,
-      anchor: { x: e.clientX, y: e.clientY },
+      anchor,
       onConfirm: (raw) => {
-        const value = label === '종료일시'
-          ? formatDateTimeRangeEndKR(raw, startValue)
-          : formatForLabel(label, raw);
+        const value = formatForLabel(label, raw);
         if (!value) return; // 빈 값이면 취소처럼 동작
         try {
           // setFieldValues 가 forceBlackOnFields + clearGuide 까지 처리한다

@@ -1,5 +1,5 @@
 import { loadTemplate } from './template-loader';
-import { discoverFields, setFieldValues, type FieldMap } from './field-filler';
+import { discoverFields, fillDateTimeRange, removeDateTimeRangeSeparator, setFieldValues, type FieldMap } from './field-filler';
 import { downloadHwp } from './download';
 import { mountPreview, refreshPreview } from './preview';
 import { registerFontFaces, preloadFonts } from './fonts';
@@ -8,10 +8,9 @@ import { setupDateTimePicker, type DateTimePickerController } from './datetime-p
 import {
   FIELD_CONFIGS,
   formatDateKR,
-  formatDateTimeRangeEndKR,
-  formatForLabel,
+  formatDateTimeRange,
   parseDateKR,
-  parseDateTimeKR,
+  parseDateTimeRange,
 } from './field-config';
 
 /**
@@ -58,8 +57,8 @@ function collectFormValues(): Record<string, string> {
     직급: raw.직급 ?? '',
     성명: name,
     이름: name,
-    시작일시: formatForLabel('시작일시', startDateTime),
-    종료일시: formatDateTimeRangeEndKR(endDateTime, startDateTime),
+    // 시작·종료를 한 누름틀(시작일시)에 합쳐 넣는다 — 종료일시 누름틀은 fillDateTimeRange 가 비운다
+    시작일시: formatDateTimeRange(startDateTime, endDateTime),
     출장지: raw.출장지 ?? '',
     갈때일자: formatDateKR(raw.갈때일자 ?? ''),
     갈때교통편: raw.갈때교통편 ?? '',
@@ -78,13 +77,14 @@ function collectFormValues(): Record<string, string> {
 function syncFormFromInline(label: string, hwpValue: string): void {
   const cfg = FIELD_CONFIGS[label];
   if (!cfg) return;
-  const inputName = label === '이름' ? '성명' : label;
-  if (cfg.type === 'datetime') {
-    const fallbackControl = label === '종료일시' ? findDateTimeControl('시작일시') : undefined;
-    const fallback = fallbackControl ? dateTimeControllers.get(fallbackControl)?.getValue() ?? '' : '';
-    setDateTimeControlValue(inputName, parseDateTimeKR(hwpValue, fallback));
+  // 시작·종료 일시는 한 누름틀(시작일시)에 범위로 합쳐 있으므로 양쪽 입력을 함께 갱신
+  if (label === '시작일시' || label === '종료일시') {
+    const { start, end } = parseDateTimeRange(hwpValue);
+    setDateTimeControlValue('시작일시', start);
+    setDateTimeControlValue('종료일시', end);
     return;
   }
+  const inputName = label === '이름' ? '성명' : label;
   const input = formEl.elements.namedItem(inputName) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null;
   if (!input) return;
   if (cfg.type === 'date') input.value = parseDateKR(hwpValue);
@@ -141,13 +141,6 @@ function setDateTimeControlValue(name: string, value: string): void {
   }
 }
 
-function findDateTimeControl(name: string): HTMLElement | undefined {
-  for (const control of formEl.querySelectorAll<HTMLElement>('[data-datetime-picker]')) {
-    if (control.dataset.datetimePicker === name) return control;
-  }
-  return undefined;
-}
-
 function applyTravelDateDefault(control: HTMLElement): void {
   const sourceName = control.dataset.datetimePicker;
   if (!sourceName) return;
@@ -182,6 +175,9 @@ async function initialize(): Promise<void> {
     console.info('[web-form] 발견한 누름틀 라벨:', [...fields.keys()]);
   }
 
+  // 2.5) 시작·종료 일시를 한 누름틀에 합쳐 넣으므로 템플릿의 리터럴 구분자(" ~ ")를 제거
+  removeDateTimeRangeSeparator(wasm, fields);
+
   // 3) 미리보기 캔버스 마운트
   const canvasView = mountPreview(previewContainer, wasm);
 
@@ -202,8 +198,9 @@ async function initialize(): Promise<void> {
   // 5) 액션 버튼 바인딩
   document.getElementById('btn-apply')!.addEventListener('click', () => {
     try {
-      const values = collectFormValues();
+      const { 시작일시: rangeText, ...values } = collectFormValues();
       const { applied, missing } = setFieldValues(wasm, fields, values);
+      fillDateTimeRange(wasm, fields, rangeText);
       refreshPreview(wasm);
       fields = discoverFields(wasm);
       const warn = missing.length > 0 ? ` (양식에 없는 라벨: ${missing.join(', ')})` : '';

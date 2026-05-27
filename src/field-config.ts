@@ -83,21 +83,38 @@ export function formatDateTimeCompactKR(value: string): string {
   return `${Number(parts.month)}.${Number(parts.day)} ${parts.hour}:${parts.minute}`;
 }
 
-/** `시작일시 ~ 종료일시` 한 줄에서 종료일시가 같은 날짜면 시간만 표시 */
-export function formatDateTimeRangeEndKR(value: string, startValue: string): string {
-  const end = getDateTimeParts(value);
-  if (!end) return value;
-
+/**
+ * 시작·종료 일시를 한 누름틀(시작일시)에 합쳐 넣을 범위 문자열로 만든다.
+ *
+ * 미리보기 렌더러가 한 셀에 누름틀이 둘 있으면 두 번째 누름틀 내용을 일정 길이 이후로
+ * 잘라버려서(글꼴 크기·정렬·줄바꿈 무관), 시작·종료를 시작일시 누름틀 하나에 모아 넣는다.
+ * - 같은 날: 종료는 시간만   → `2026. 05. 22. 14:00 ~ 18:00`
+ * - 다른 날: 종료는 연도 생략 → `2026. 05. 22. 14:00 ~ 05. 23. 18:00`
+ */
+export function formatDateTimeRange(startValue: string, endValue: string): string {
   const start = getDateTimeParts(startValue);
-  if (
-    start &&
-    start.year === end.year &&
-    start.month === end.month &&
-    start.day === end.day
-  ) {
-    return `${end.hour}:${end.minute}`;
-  }
-  return formatDateTimeCompactKR(value);
+  if (!start) return '';
+  const startStr = `${start.year}. ${start.month}. ${start.day}. ${start.hour}:${start.minute}`;
+  const end = getDateTimeParts(endValue);
+  if (!end) return startStr;
+  const sameDay = start.year === end.year && start.month === end.month && start.day === end.day;
+  const endStr = sameDay
+    ? `${end.hour}:${end.minute}`
+    : `${end.month}. ${end.day}. ${end.hour}:${end.minute}`;
+  return `${startStr} ~ ${endStr}`;
+}
+
+/** 범위 문자열(`...14:00 ~ 18:00` / `...14:00 ~ 05. 23. 18:00`)을 시작·종료 datetime-local 값으로 분해 */
+export function parseDateTimeRange(value: string): { start: string; end: string } {
+  if (!value) return { start: '', end: '' };
+  const tildeIdx = value.indexOf('~');
+  const startPart = (tildeIdx >= 0 ? value.slice(0, tildeIdx) : value).trim();
+  const start = parseDateTimeKR(startPart);
+  if (tildeIdx < 0) return { start, end: '' };
+  const endPart = value.slice(tildeIdx + 1).trim();
+  // 종료는 시간만/연도생략/전체 어떤 형태든 시작값을 fallback 으로 보정
+  const end = parseDateTimeKR(endPart, start);
+  return { start, end };
 }
 
 /** date 폼 값 (`2026-05-22`) → 한국식 (`2026. 05. 22.`) */

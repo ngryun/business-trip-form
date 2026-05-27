@@ -19,6 +19,9 @@ export interface FieldEntry {
 /** label → 해당 라벨을 가진 필드들의 묶음. label 은 name 우선, name 이 비어 있으면 guide. */
 export type FieldMap = Map<string, FieldEntry[]>;
 
+/** 시작일시 누름틀에 범위를 합쳐 넣으므로, 종료일시 누름틀은 항상 비운 채로 둔다 (안내문구 복원 금지). */
+const SUPPRESSED_GUIDE_LABELS = new Set(['종료일시']);
+
 /**
  * 문서 내 모든 누름틀을 조회하여 label → [FieldEntry, ...] 매핑을 반환한다.
  *
@@ -61,6 +64,76 @@ function pushTo(map: FieldMap, key: string, entry: FieldEntry): void {
 }
 
 /**
+ * 시작일시·종료일시 누름틀이 한 셀에 `시작 ~ 종료` 형태로 들어있을 때,
+ * 둘 사이의 리터럴 구분자(" ~ ")를 한 번 제거한다.
+ *
+ * 범위 전체를 시작일시 누름틀 하나에 합쳐 넣기 때문에, 템플릿의 리터럴 구분자가 남으면
+ * 다운로드한 한글 문서에서 `... 18:00 ~`(중복 물결)처럼 보이고, 시작만 입력한 경우
+ * 미리보기에도 꼬리 물결이 남는다. 로드 직후 한 번만 호출한다.
+ */
+export function removeDateTimeRangeSeparator(wasm: WasmBridge, fields: FieldMap): void {
+  const starts = fields.get('시작일시') ?? [];
+  const ends = fields.get('종료일시') ?? [];
+  if (starts.length === 0 || ends.length === 0) return;
+
+  const locById = new Map(wasm.getFieldList().map((f) => [f.fieldId, f.location]));
+  for (const start of starts) {
+    const sLoc = locById.get(start.fieldId);
+    const sp = sLoc?.path?.[0];
+    if (!sLoc || !sp || sLoc.path!.length !== 1) continue; // 단일 깊이 셀만 처리
+
+    const end = ends.find((e) => {
+      const eLoc = locById.get(e.fieldId);
+      const ep = eLoc?.path?.[0];
+      return !!eLoc && !!ep
+        && eLoc.sectionIndex === sLoc.sectionIndex
+        && eLoc.paraIndex === sLoc.paraIndex
+        && ep.controlIndex === sp.controlIndex
+        && ep.cellIndex === sp.cellIndex
+        && ep.paraIndex === sp.paraIndex;
+    });
+    if (end) deleteFieldGap(wasm, sLoc, sp, start.fieldId, end.fieldId);
+  }
+}
+
+/** 같은 셀 안에서 시작일시 누름틀과 종료일시 누름틀 사이의 비-필드 문자(구분자)를 삭제 */
+function deleteFieldGap(
+  wasm: WasmBridge,
+  loc: FieldListEntry['location'],
+  cellPath: NonNullable<FieldListEntry['location']['path']>[number],
+  startId: number,
+  endId: number,
+): void {
+  const sec = loc.sectionIndex;
+  const parentPara = loc.paraIndex;
+  const { controlIndex, cellIndex, paraIndex: cellPara } = cellPath;
+
+  let len: number;
+  try { len = wasm.getCellParagraphLength(sec, parentPara, controlIndex, cellIndex, cellPara); } catch { return; }
+
+  let seenStart = false;
+  let gapStart = -1;
+  let gapEnd = -1;
+  for (let i = 0; i <= len; i++) {
+    const pos = buildProbePosition(sec, parentPara, [cellPath], i);
+    let fi;
+    try { fi = wasm.getFieldInfoAt(pos); } catch { return; }
+    if (fi.inField && fi.fieldId === startId) {
+      seenStart = true;
+    } else if (fi.inField && fi.fieldId === endId) {
+      if (seenStart && gapStart >= 0 && gapEnd < 0) gapEnd = i;
+    } else if (!fi.inField && seenStart && gapStart < 0) {
+      gapStart = i;
+    }
+  }
+  if (gapStart < 0) return;
+  if (gapEnd < 0) gapEnd = len; // 종료일시가 갭 뒤에서 안 잡히면 문단 끝까지
+  const count = gapEnd - gapStart;
+  if (count <= 0) return;
+  try { wasm.deleteTextInCell(sec, parentPara, controlIndex, cellIndex, cellPara, gapStart, count); } catch { /* noop */ }
+}
+
+/**
  * label → 값 매핑을 받아 각 라벨에 해당하는 필드를 모두 채운다.
  *
  * 같은 라벨이 여러 필드(본문/결재란 등)에 매칭되면 같은 값으로 모두 채운다.
@@ -96,10 +169,52 @@ export function setFieldValues(
   return { applied, missing };
 }
 
+/**
+ * 시작·종료 일시를 시작일시 누름틀 하나에 합쳐 넣고, 종료일시 누름틀은 값·안내문구 모두 비운다.
+ *
+ * 미리보기 렌더러가 한 셀의 두 번째 누름틀 내용을 잘라먹는 한계를 우회하기 위함.
+ * rangeText 가 비어 있으면(시작 미입력) 아무것도 건드리지 않아 기존 안내문구를 유지한다.
+ */
+export function fillDateTimeRange(wasm: WasmBridge, fields: FieldMap, rangeText: string): void {
+  if (!rangeText) return;
+  const startTargets = fields.get('시작일시') ?? [];
+  const endTargets = fields.get('종료일시') ?? [];
+
+  const filled = new Set<number>();
+  for (const t of startTargets) {
+    const res = wasm.setFieldValue(t.fieldId, rangeText);
+    if (res.ok) filled.add(t.fieldId);
+  }
+  for (const t of endTargets) {
+    try { wasm.setFieldValue(t.fieldId, ''); } catch { /* noop */ }
+    clearFieldGuide(wasm, t.fieldId);
+  }
+  // 시작일시 누름틀 글자색을 검정으로 (안내문 빨강 잔존 방지) + 안내문구 제거
+  forceBlackOnFields(wasm, filled);
+}
+
+/** 누름틀 안내문구(guide)를 비워 화면에 placeholder 가 남지 않게 한다 (name 은 유지해 재탐색 가능). */
+function clearFieldGuide(wasm: WasmBridge, fieldId: number): void {
+  try {
+    const props = (wasm as any).getClickHereProps?.(fieldId);
+    if (!props?.ok) return;
+    (wasm as any).updateClickHereProps?.(
+      fieldId,
+      '',
+      props.memo ?? '',
+      props.name ?? '',
+      props.editable ?? true,
+    );
+  } catch {
+    /* 안내문구 제거 실패는 값 주입 자체를 막지 않는다. */
+  }
+}
+
 function restoreEmptyFieldGuides(wasm: WasmBridge, fields: FieldMap): void {
   const latestById = new Map(wasm.getFieldList().map((f) => [f.fieldId, f]));
   const seen = new Set<number>();
   for (const [label, entries] of fields) {
+    if (SUPPRESSED_GUIDE_LABELS.has(label)) continue;
     for (const entry of entries) {
       if (seen.has(entry.fieldId)) continue;
       seen.add(entry.fieldId);
