@@ -25,6 +25,7 @@ import {
 
 // GitHub Pages 등 하위 경로 배포 대응 — BASE_URL 기준 상대 경로
 const TEMPLATE_URL = `${import.meta.env.BASE_URL}templates/business-trip.hwp`;
+const FORM_STORAGE_KEY = 'business-trip-form:form-values:v1';
 
 const statusEl = document.getElementById('status') as HTMLParagraphElement;
 const formEl = document.getElementById('trip-form') as HTMLFormElement;
@@ -36,6 +37,14 @@ const TRAVEL_DATE_DEFAULTS: Record<string, string> = {
   종료일시: '올때일자',
 };
 const dateTimeControllers = new WeakMap<HTMLElement, DateTimePickerController>();
+const autoTravelDates = new Map<string, string>();
+let liveDateTimePreviewHandler: (() => void) | null = null;
+
+interface SavedFormState {
+  autoTravelDates?: Record<string, string>;
+  updatedAt?: string;
+  values?: Record<string, string>;
+}
 
 function setStatus(message: string, isError = false): void {
   statusEl.textContent = message;
@@ -73,6 +82,73 @@ function collectFormValues(): Record<string, string> {
   };
 }
 
+function setupLocalFormPersistence(): void {
+  formEl.addEventListener('input', saveFormState);
+  formEl.addEventListener('change', saveFormState);
+}
+
+function restoreFormState(): boolean {
+  let saved: SavedFormState | null = null;
+  try {
+    const raw = localStorage.getItem(FORM_STORAGE_KEY);
+    saved = raw ? JSON.parse(raw) as SavedFormState : null;
+  } catch {
+    return false;
+  }
+  if (!saved?.values) return false;
+
+  for (const [name, value] of Object.entries(saved.values)) {
+    const control = formEl.elements.namedItem(name);
+    if (!control) continue;
+    if (control instanceof RadioNodeList) {
+      control.value = value;
+    } else if (
+      control instanceof HTMLInputElement ||
+      control instanceof HTMLSelectElement ||
+      control instanceof HTMLTextAreaElement
+    ) {
+      control.value = value;
+    }
+  }
+
+  autoTravelDates.clear();
+  for (const [name, value] of Object.entries(saved.autoTravelDates ?? {})) {
+    autoTravelDates.set(name, value);
+  }
+  return true;
+}
+
+function saveFormState(): void {
+  try {
+    localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify({
+      autoTravelDates: Object.fromEntries(autoTravelDates),
+      updatedAt: new Date().toISOString(),
+      values: collectRawFormValues(),
+    } satisfies SavedFormState));
+  } catch {
+    // Safari private mode 등 저장소를 쓸 수 없는 환경에서는 저장만 건너뛴다.
+  }
+}
+
+function clearSavedFormState(): void {
+  try { localStorage.removeItem(FORM_STORAGE_KEY); } catch { /* ignore */ }
+}
+
+function collectRawFormValues(): Record<string, string> {
+  syncAllDateTimeControlsToHidden();
+  const values: Record<string, string> = {};
+  for (const el of Array.from(formEl.elements)) {
+    if (
+      el instanceof HTMLInputElement ||
+      el instanceof HTMLSelectElement ||
+      el instanceof HTMLTextAreaElement
+    ) {
+      if (el.name) values[el.name] = el.value;
+    }
+  }
+  return values;
+}
+
 /** 인라인 편집으로 누름틀이 바뀌면 같은 라벨의 폼 입력도 동기화한다. */
 function syncFormFromInline(label: string, hwpValue: string): void {
   const cfg = FIELD_CONFIGS[label];
@@ -106,7 +182,10 @@ function setupDateTimeControls(): void {
     const controller = setupDateTimePicker(control, {
       defaultHour: control.dataset.datetimeDefaultHour,
       placeholder: control.dataset.datetimePlaceholder,
-      onChange: () => applyTravelDateDefault(control),
+      onChange: () => {
+        applyTravelDateDefault(control);
+        liveDateTimePreviewHandler?.();
+      },
     });
     if (controller) {
       dateTimeControllers.set(control, controller);
@@ -149,21 +228,31 @@ function applyTravelDateDefault(control: HTMLElement): void {
 
   const date = dateTimeControllers.get(control)?.getDate();
   const target = formEl.elements.namedItem(targetName) as HTMLInputElement | null;
-  if (!date || !target || target.value) return;
+  if (!date || !target) return;
+  const previousAutoDate = autoTravelDates.get(targetName);
+  if (target.value && target.value !== previousAutoDate) {
+    if (target.value === date) autoTravelDates.set(targetName, date);
+    return;
+  }
   target.value = date;
+  autoTravelDates.set(targetName, date);
 }
 
 async function initialize(): Promise<void> {
   setStatus('양식 엔진 초기화 중...');
   registerFontFaces();
   setupPanelToggle();
+  const restoredFormState = restoreFormState();
   setupDateTimeControls();
+  setupLocalFormPersistence();
+  await preloadFonts();
 
   // 1) HWP 양식 fetch + 로드
   const { wasm, docInfo } = await loadTemplate(TEMPLATE_URL);
 
-  // 1.5) 문서가 실제로 쓰는 폰트들을 적극 프리로드
+  // 1.5) 문서가 실제로 쓰는 폰트들을 적극 프리로드한 뒤 레이아웃 폭 측정값을 갱신
   await preloadFonts(docInfo.fontsUsed ?? []);
+  wasm.refreshLayout();
 
   setStatus(`양식 로드 완료 (${docInfo.pageCount}쪽). 폼에서 입력하거나 미리보기에서 누름틀을 클릭하세요.`);
 
@@ -177,9 +266,48 @@ async function initialize(): Promise<void> {
 
   // 2.5) 시작·종료 일시를 한 누름틀에 합쳐 넣으므로 템플릿의 리터럴 구분자(" ~ ")를 제거
   removeDateTimeRangeSeparator(wasm, fields);
+  wasm.refreshLayout();
 
   // 3) 미리보기 캔버스 마운트
   const canvasView = mountPreview(previewContainer, wasm);
+  function applyCollectedValuesToPreview(statusMessage?: string): void {
+    const { 시작일시: rangeText, ...values } = collectFormValues();
+    const { applied, missing } = setFieldValues(wasm, fields, values);
+    fillDateTimeRange(wasm, fields, rangeText);
+    refreshPreview(wasm);
+    fields = discoverFields(wasm);
+    if (!statusMessage) return;
+    const warn = missing.length > 0 ? ` (양식에 없는 라벨: ${missing.join(', ')})` : '';
+    setStatus(statusMessage.replace('{applied}', String(applied)) + warn, missing.length > 0);
+  }
+
+  function applyTravelDatesToPreview(): void {
+    const { 갈때일자, 올때일자 } = collectFormValues();
+    setFieldValues(wasm, fields, { 갈때일자, 올때일자 });
+  }
+
+  if (restoredFormState) {
+    applyCollectedValuesToPreview('저장된 입력 내용을 복원했습니다.');
+  }
+
+  let livePreviewTimer = 0;
+  liveDateTimePreviewHandler = () => {
+    window.clearTimeout(livePreviewTimer);
+    livePreviewTimer = window.setTimeout(() => {
+      try {
+        const { 시작일시: rangeText, 갈때일자, 올때일자 } = collectFormValues();
+        setFieldValues(wasm, fields, { 갈때일자, 올때일자 });
+        fillDateTimeRange(wasm, fields, rangeText);
+        refreshPreview(wasm);
+        fields = discoverFields(wasm);
+        saveFormState();
+        setStatus('일시와 이동 일자를 미리보기에 반영했습니다.');
+      } catch (err) {
+        console.error(err);
+        setStatus(`일시 반영 실패: ${(err as Error).message}`, true);
+      }
+    }, 80);
+  };
 
   // 4) 인라인 편집 핸들러 부착
   attachInlineEditing({
@@ -188,9 +316,13 @@ async function initialize(): Promise<void> {
     container: previewContainer,
     getFields: () => fields,
     onAfterEdit: (label, value) => {
+      syncFormFromInline(label, value);
+      if (label === '시작일시' || label === '종료일시') {
+        applyTravelDatesToPreview();
+      }
       refreshPreview(wasm);
       fields = discoverFields(wasm);
-      syncFormFromInline(label, value);
+      saveFormState();
       setStatus(`"${label}" 항목을 반영했습니다.`);
     },
   });
@@ -198,13 +330,8 @@ async function initialize(): Promise<void> {
   // 5) 액션 버튼 바인딩
   document.getElementById('btn-apply')!.addEventListener('click', () => {
     try {
-      const { 시작일시: rangeText, ...values } = collectFormValues();
-      const { applied, missing } = setFieldValues(wasm, fields, values);
-      fillDateTimeRange(wasm, fields, rangeText);
-      refreshPreview(wasm);
-      fields = discoverFields(wasm);
-      const warn = missing.length > 0 ? ` (양식에 없는 라벨: ${missing.join(', ')})` : '';
-      setStatus(`${applied}개 필드에 반영했습니다.${warn}`, missing.length > 0);
+      saveFormState();
+      applyCollectedValuesToPreview('{applied}개 필드에 반영했습니다.');
     } catch (err) {
       console.error(err);
       setStatus(`반영 실패: ${(err as Error).message}`, true);
@@ -228,6 +355,8 @@ async function initialize(): Promise<void> {
 
   document.getElementById('btn-reset')!.addEventListener('click', () => {
     formEl.reset();
+    autoTravelDates.clear();
+    clearSavedFormState();
     syncAllDateTimeControlsFromHidden();
     setStatus('초기화했습니다.');
   });

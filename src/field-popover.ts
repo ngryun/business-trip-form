@@ -24,6 +24,14 @@ export interface PopoverArgs {
   onCancel: () => void;
 }
 
+export interface DateTimeRangePopoverArgs {
+  anchor: { x: number; y: number };
+  endValue: string;
+  onCancel: () => void;
+  onConfirm: (startValue: string, endValue: string) => void;
+  startValue: string;
+}
+
 let currentPopover: HTMLElement | null = null;
 let currentCleanup: (() => void) | null = null;
 
@@ -100,6 +108,71 @@ export function showFieldPopover(args: PopoverArgs): void {
   currentPopover = root;
 }
 
+export function showDateTimeRangePopover(args: DateTimeRangePopoverArgs): void {
+  closeFieldPopover();
+
+  const root = document.createElement('div');
+  root.className = 'field-popover field-popover--range';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-label', '출장 일시 입력');
+
+  const titleEl = document.createElement('div');
+  titleEl.className = 'field-popover__title';
+  titleEl.textContent = '출장 일시';
+  root.appendChild(titleEl);
+
+  const range = document.createElement('div');
+  range.className = 'field-popover__range';
+  const startPicker = createRangeDateTimeField('시작 일시', args.startValue, '09');
+  const endPicker = createRangeDateTimeField('종료 일시', args.endValue, '18');
+  range.append(startPicker.root, endPicker.root);
+  root.appendChild(range);
+
+  const buttons = document.createElement('div');
+  buttons.className = 'field-popover__buttons';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'field-popover__cancel';
+  cancelBtn.textContent = '취소';
+  const confirmBtn = document.createElement('button');
+  confirmBtn.type = 'button';
+  confirmBtn.className = 'field-popover__confirm';
+  confirmBtn.textContent = '확인';
+  buttons.append(cancelBtn, confirmBtn);
+  root.appendChild(buttons);
+
+  document.body.appendChild(root);
+  positionNear(root, args.anchor);
+
+  const finish = (commit: boolean): void => {
+    if (commit) {
+      args.onConfirm(getDateTimePickerValue(startPicker.picker), getDateTimePickerValue(endPicker.picker));
+    } else {
+      args.onCancel();
+    }
+    closeFieldPopover();
+  };
+
+  confirmBtn.addEventListener('click', () => finish(true));
+  cancelBtn.addEventListener('click', () => finish(false));
+  root.addEventListener('keydown', (e) => {
+    const ke = e as KeyboardEvent;
+    if (ke.key === 'Escape') {
+      ke.preventDefault();
+      finish(false);
+    }
+  });
+
+  const onOuter = (e: MouseEvent): void => {
+    if (!root.contains(e.target as Node)) finish(false);
+  };
+  setTimeout(() => document.addEventListener('mousedown', onOuter, { capture: true }), 0);
+  currentCleanup = () => document.removeEventListener('mousedown', onOuter, { capture: true } as any);
+
+  setTimeout(() => focusInput(startPicker.picker), 0);
+  currentPopover = root;
+}
+
 export function closeFieldPopover(): void {
   if (currentCleanup) {
     currentCleanup();
@@ -148,6 +221,20 @@ function createInput(label: string, cfg: WidgetConfig, initial: string): HTMLEle
   else inp.type = 'text';
   inp.value = initial;
   return inp;
+}
+
+function createRangeDateTimeField(label: string, initial: string, defaultHour: string): { root: HTMLElement; picker: HTMLElement } {
+  const root = document.createElement('section');
+  root.className = 'field-popover__range-field';
+
+  const heading = document.createElement('div');
+  heading.className = 'field-popover__range-label';
+  heading.textContent = label;
+
+  const picker = createDateTimePicker(initial, { defaultHour, inline: true });
+  picker.classList.add('field-popover__range-picker');
+  root.append(heading, picker);
+  return { root, picker };
 }
 
 function getInputValue(el: HTMLElement): string {

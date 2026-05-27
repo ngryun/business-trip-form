@@ -423,6 +423,52 @@ html, body {
 .field-popover__input.datetime-picker:focus {
   outline: 0;
 }
+.field-popover--range {
+  width: min(840px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+}
+.field-popover__range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.field-popover__range-field {
+  min-width: 0;
+}
+.field-popover__range-label {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #374151;
+}
+.field-popover__range .datetime-picker__panel {
+  position: static;
+  width: 100%;
+  max-height: none;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  padding: 8px;
+  overflow: visible;
+  box-shadow: none;
+}
+.field-popover__range .datetime-calendar__weekdays span {
+  height: 16px;
+}
+.field-popover__range .datetime-calendar__day {
+  height: 24px;
+  aspect-ratio: auto;
+}
+.field-popover__range .datetime-time {
+  gap: 7px;
+}
+.field-popover__range .datetime-time__buttons {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 3px;
+}
+.field-popover__range .datetime-time__button {
+  height: 24px;
+  font-size: 11px;
+}
 .field-popover__buttons {
   display: flex;
   gap: 6px;
@@ -462,6 +508,9 @@ html, body {
   .field-popover .datetime-picker__panel {
     position: static;
     width: min(360px, calc(100vw - 24px));
+  }
+  .field-popover__range {
+    grid-template-columns: 1fr;
   }
   .datetime-calendar__header {
     margin-bottom: 6px;

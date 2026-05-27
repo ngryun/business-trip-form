@@ -37,5 +37,6 @@ export function refreshPreview(wasm: WasmBridge): void {
   if (!canvasView) return;
   // 누름틀이 active 상태로 잔존하면 안내문이 화면에 남을 수 있어 명시적으로 해제
   try { (wasm as any).clearActiveField?.(); } catch { /* ignore */ }
+  try { wasm.refreshLayout(); } catch { /* ignore */ }
   canvasView.loadDocument();
 }
