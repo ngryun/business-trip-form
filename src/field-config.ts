@@ -14,6 +14,8 @@ export type WidgetConfig =
 const TRANSPORT_OPTIONS = ['자가용', '버스', '기차/KTX', '항공', '지하철', '택시'];
 export const DATETIME_MINUTE_STEP = 10;
 export const DATETIME_STEP_SECONDS = DATETIME_MINUTE_STEP * 60;
+export const DATETIME_HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => pad2(i));
+export const DATETIME_MINUTE_OPTIONS = Array.from({ length: 60 / DATETIME_MINUTE_STEP }, (_, i) => pad2(i * DATETIME_MINUTE_STEP));
 
 export const FIELD_CONFIGS: Record<string, WidgetConfig> = {
   소속: { type: 'text' },
@@ -53,6 +55,18 @@ export function normalizeDateTimeLocalStep(value: string): string {
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 }
 
+export function composeDateTimeLocalValue(date: string, hour: string, minute: string): string {
+  if (!date || !hour || !minute) return '';
+  return normalizeDateTimeLocalStep(`${date}T${hour}:${minute}`);
+}
+
+export function splitDateTimeLocal(value: string): { date: string; hour: string; minute: string } {
+  const normalized = normalizeDateTimeLocalStep(value);
+  const match = normalized.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/);
+  if (!match) return { date: '', hour: '', minute: '' };
+  return { date: match[1], hour: match[2], minute: match[3] };
+}
+
 /** datetime-local 폼 값 (`2026-05-22T14:00`) → 한국식 (`2026. 05. 22. 14:00`) */
 export function formatDateTimeKR(value: string): string {
   if (!value) return '';
@@ -73,7 +87,7 @@ export function formatDateKR(value: string): string {
 export function parseDateTimeKR(value: string): string {
   const m = value.match(/(\d{4})\.\s*(\d{2})\.\s*(\d{2})\.\s*(\d{2}):(\d{2})/);
   if (!m) return '';
-  return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}`;
+  return normalizeDateTimeLocalStep(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}`);
 }
 
 /** 한국식 (`2026. 05. 22.`) → date 입력값 */

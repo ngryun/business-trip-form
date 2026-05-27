@@ -5,13 +5,15 @@ import { mountPreview, refreshPreview } from './preview';
 import { registerFontFaces, preloadFonts } from './fonts';
 import { attachInlineEditing } from './field-interaction';
 import {
+  composeDateTimeLocalValue,
+  DATETIME_HOUR_OPTIONS,
+  DATETIME_MINUTE_OPTIONS,
   FIELD_CONFIGS,
-  DATETIME_STEP_SECONDS,
   formatDateKR,
   formatDateTimeKR,
-  normalizeDateTimeLocalStep,
   parseDateKR,
   parseDateTimeKR,
+  splitDateTimeLocal,
 } from './field-config';
 
 /**
@@ -39,6 +41,7 @@ function setStatus(message: string, isError = false): void {
 }
 
 function collectFormValues(): Record<string, string> {
+  syncAllDateTimeControlsToHidden();
   const data = new FormData(formEl);
   const raw: Record<string, string> = {};
   data.forEach((v, k) => {
@@ -71,10 +74,13 @@ function syncFormFromInline(label: string, hwpValue: string): void {
   const cfg = FIELD_CONFIGS[label];
   if (!cfg) return;
   const inputName = label === '이름' ? '성명' : label;
+  if (cfg.type === 'datetime') {
+    setDateTimeControlValue(inputName, parseDateTimeKR(hwpValue));
+    return;
+  }
   const input = formEl.elements.namedItem(inputName) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null;
   if (!input) return;
-  if (cfg.type === 'datetime') input.value = parseDateTimeKR(hwpValue);
-  else if (cfg.type === 'date') input.value = parseDateKR(hwpValue);
+  if (cfg.type === 'date') input.value = parseDateKR(hwpValue);
   else input.value = hwpValue;
 }
 
@@ -88,14 +94,90 @@ function setupPanelToggle(): void {
 }
 
 function setupDateTimeControls(): void {
-  const inputs = formEl.querySelectorAll<HTMLInputElement>('input[type="datetime-local"]');
-  for (const input of inputs) {
-    input.step = String(DATETIME_STEP_SECONDS);
-    const normalize = (): void => {
-      input.value = normalizeDateTimeLocalStep(input.value);
-    };
-    input.addEventListener('change', normalize);
-    input.addEventListener('blur', normalize);
+  const controls = formEl.querySelectorAll<HTMLElement>('[data-datetime-picker]');
+  for (const control of controls) {
+    const parts = getDateTimeControlParts(control);
+    if (!parts) continue;
+
+    fillDateTimeSelect(parts.hourSelect, DATETIME_HOUR_OPTIONS, '시', '시');
+    fillDateTimeSelect(parts.minuteSelect, DATETIME_MINUTE_OPTIONS, '분', '분');
+    setDateTimeControlVisibleValue(control, parts.hidden.value);
+
+    parts.dateInput.addEventListener('change', () => syncDateTimeControlToHidden(control));
+    parts.hourSelect.addEventListener('change', () => syncDateTimeControlToHidden(control));
+    parts.minuteSelect.addEventListener('change', () => syncDateTimeControlToHidden(control));
+  }
+}
+
+function syncAllDateTimeControlsToHidden(): void {
+  for (const control of formEl.querySelectorAll<HTMLElement>('[data-datetime-picker]')) {
+    syncDateTimeControlToHidden(control);
+  }
+}
+
+function syncAllDateTimeControlsFromHidden(): void {
+  for (const control of formEl.querySelectorAll<HTMLElement>('[data-datetime-picker]')) {
+    const parts = getDateTimeControlParts(control);
+    if (parts) setDateTimeControlVisibleValue(control, parts.hidden.value);
+  }
+}
+
+function syncDateTimeControlToHidden(control: HTMLElement): void {
+  const parts = getDateTimeControlParts(control);
+  if (!parts) return;
+  parts.hidden.value = composeDateTimeLocalValue(
+    parts.dateInput.value,
+    parts.hourSelect.value,
+    parts.minuteSelect.value,
+  );
+}
+
+function setDateTimeControlValue(name: string, value: string): void {
+  const hidden = formEl.elements.namedItem(name) as HTMLInputElement | null;
+  if (hidden) hidden.value = value;
+
+  for (const control of formEl.querySelectorAll<HTMLElement>('[data-datetime-picker]')) {
+    if (control.dataset.datetimePicker === name) {
+      setDateTimeControlVisibleValue(control, value);
+      syncDateTimeControlToHidden(control);
+      return;
+    }
+  }
+}
+
+function setDateTimeControlVisibleValue(control: HTMLElement, value: string): void {
+  const parts = getDateTimeControlParts(control);
+  if (!parts) return;
+  const parsed = splitDateTimeLocal(value);
+  parts.dateInput.value = parsed.date;
+  parts.hourSelect.value = parsed.hour;
+  parts.minuteSelect.value = parsed.minute;
+}
+
+function getDateTimeControlParts(control: HTMLElement): {
+  hidden: HTMLInputElement;
+  dateInput: HTMLInputElement;
+  hourSelect: HTMLSelectElement;
+  minuteSelect: HTMLSelectElement;
+} | null {
+  const hidden = control.querySelector<HTMLInputElement>('input[type="hidden"]');
+  const dateInput = control.querySelector<HTMLInputElement>('[data-datetime-date]');
+  const hourSelect = control.querySelector<HTMLSelectElement>('[data-datetime-hour]');
+  const minuteSelect = control.querySelector<HTMLSelectElement>('[data-datetime-minute]');
+  if (!hidden || !dateInput || !hourSelect || !minuteSelect) return null;
+  return { hidden, dateInput, hourSelect, minuteSelect };
+}
+
+function fillDateTimeSelect(select: HTMLSelectElement, values: string[], placeholder: string, suffix: string): void {
+  const blank = document.createElement('option');
+  blank.value = '';
+  blank.textContent = placeholder;
+  select.replaceChildren(blank);
+  for (const value of values) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = `${value}${suffix}`;
+    select.appendChild(option);
   }
 }
 
@@ -170,6 +252,7 @@ async function initialize(): Promise<void> {
 
   document.getElementById('btn-reset')!.addEventListener('click', () => {
     formEl.reset();
+    syncAllDateTimeControlsFromHidden();
     setStatus('초기화했습니다.');
   });
 }

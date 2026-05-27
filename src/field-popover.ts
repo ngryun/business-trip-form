@@ -7,9 +7,11 @@
  */
 
 import {
-  DATETIME_STEP_SECONDS,
+  composeDateTimeLocalValue,
+  DATETIME_HOUR_OPTIONS,
+  DATETIME_MINUTE_OPTIONS,
   FIELD_CONFIGS,
-  normalizeDateTimeLocalStep,
+  splitDateTimeLocal,
   type WidgetConfig,
 } from './field-config';
 
@@ -41,7 +43,7 @@ export function showFieldPopover(args: PopoverArgs): void {
   root.appendChild(titleEl);
 
   const input = createInput(cfg, args.initialValue);
-  input.className = 'field-popover__input';
+  input.classList.add('field-popover__input');
   root.appendChild(input);
 
   const buttons = document.createElement('div');
@@ -92,12 +94,7 @@ export function showFieldPopover(args: PopoverArgs): void {
 
   // 자동 포커스 (텍스트 인풋은 전체 선택까지)
   setTimeout(() => {
-    if (input instanceof HTMLInputElement) {
-      input.focus();
-      if (input.type === 'text') input.select();
-    } else if (input instanceof HTMLTextAreaElement || input instanceof HTMLSelectElement) {
-      input.focus();
-    }
+    focusInput(input);
   }, 0);
 
   currentPopover = root;
@@ -140,32 +137,81 @@ function createInput(cfg: WidgetConfig, initial: string): HTMLElement {
     ta.value = initial;
     return ta;
   }
-  const inp = document.createElement('input');
   if (cfg.type === 'datetime') {
-    inp.type = 'datetime-local';
-    inp.step = String(DATETIME_STEP_SECONDS);
-    const normalize = (): void => {
-      inp.value = normalizeDateTimeLocalStep(inp.value);
-    };
-    inp.addEventListener('change', normalize);
-    inp.addEventListener('blur', normalize);
-  } else if (cfg.type === 'date') {
-    inp.type = 'date';
-  } else {
-    inp.type = 'text';
+    return createDateTimeInput(initial);
   }
+  const inp = document.createElement('input');
+  if (cfg.type === 'date') inp.type = 'date';
+  else inp.type = 'text';
   inp.value = initial;
   return inp;
 }
 
 function getInputValue(el: HTMLElement): string {
-  if (el instanceof HTMLInputElement && el.type === 'datetime-local') {
-    return normalizeDateTimeLocalStep(el.value);
+  if (el.classList.contains('datetime-picker')) {
+    const dateInput = el.querySelector<HTMLInputElement>('[data-datetime-date]');
+    const hourSelect = el.querySelector<HTMLSelectElement>('[data-datetime-hour]');
+    const minuteSelect = el.querySelector<HTMLSelectElement>('[data-datetime-minute]');
+    return composeDateTimeLocalValue(
+      dateInput?.value ?? '',
+      hourSelect?.value ?? '',
+      minuteSelect?.value ?? '',
+    );
   }
   if (el instanceof HTMLSelectElement || el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
     return el.value;
   }
   return '';
+}
+
+function createDateTimeInput(initial: string): HTMLElement {
+  const root = document.createElement('div');
+  root.className = 'datetime-picker';
+
+  const dateInput = document.createElement('input');
+  dateInput.type = 'date';
+  dateInput.dataset.datetimeDate = '';
+  dateInput.setAttribute('aria-label', '일자');
+
+  const hourSelect = document.createElement('select');
+  hourSelect.dataset.datetimeHour = '';
+  hourSelect.setAttribute('aria-label', '시');
+  fillDateTimeSelect(hourSelect, DATETIME_HOUR_OPTIONS, '시', '시');
+
+  const minuteSelect = document.createElement('select');
+  minuteSelect.dataset.datetimeMinute = '';
+  minuteSelect.setAttribute('aria-label', '분');
+  fillDateTimeSelect(minuteSelect, DATETIME_MINUTE_OPTIONS, '분', '분');
+
+  const parsed = splitDateTimeLocal(initial);
+  dateInput.value = parsed.date;
+  hourSelect.value = parsed.hour;
+  minuteSelect.value = parsed.minute;
+
+  root.append(dateInput, hourSelect, minuteSelect);
+  return root;
+}
+
+function fillDateTimeSelect(select: HTMLSelectElement, values: string[], placeholder: string, suffix: string): void {
+  const blank = document.createElement('option');
+  blank.value = '';
+  blank.textContent = placeholder;
+  select.replaceChildren(blank);
+  for (const value of values) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = `${value}${suffix}`;
+    select.appendChild(option);
+  }
+}
+
+function focusInput(input: HTMLElement): void {
+  const target = input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement || input instanceof HTMLSelectElement
+    ? input
+    : input.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input, textarea, select');
+  if (!target) return;
+  target.focus();
+  if (target instanceof HTMLInputElement && target.type === 'text') target.select();
 }
 
 function positionNear(el: HTMLElement, anchor: { x: number; y: number }): void {

@@ -105,6 +105,20 @@ html, body {
   outline-offset: -1px;
   border-color: transparent;
 }
+.datetime-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px 72px;
+  gap: 6px;
+  width: 100%;
+}
+.form-pane .datetime-picker {
+  margin-top: 4px;
+}
+.form-pane .datetime-picker input,
+.form-pane .datetime-picker select {
+  margin-top: 0;
+  min-width: 0;
+}
 
 .actions {
   display: flex;
@@ -209,6 +223,29 @@ html, body {
   font-family: inherit;
 }
 .field-popover__input:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: -1px;
+  border-color: transparent;
+}
+.field-popover__input.datetime-picker {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+.field-popover__input.datetime-picker:focus {
+  outline: 0;
+}
+.field-popover .datetime-picker input,
+.field-popover .datetime-picker select {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 14px;
+  font-family: inherit;
+}
+.field-popover .datetime-picker input:focus,
+.field-popover .datetime-picker select:focus {
   outline: 2px solid #2563eb;
   outline-offset: -1px;
   border-color: transparent;
