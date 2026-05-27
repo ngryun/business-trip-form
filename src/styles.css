@@ -151,6 +151,16 @@ html, body {
   margin: 0 auto;
 }
 
+/* 누름틀 호버 하이라이트 — 클릭 가능한 영역을 노란 음영으로 표시 */
+.field-hover-highlight {
+  position: absolute;
+  background: rgba(250, 204, 21, 0.30);
+  border: 1px solid rgba(202, 138, 4, 0.7);
+  border-radius: 2px;
+  pointer-events: none; /* 클릭은 캔버스로 통과 */
+  z-index: 5;
+}
+
 /* CanvasView 가 left:50% + translateX(-50%) 로 페이지를 중앙 정렬하므로 absolute 필요 */
 #scroll-content canvas {
   position: absolute;
