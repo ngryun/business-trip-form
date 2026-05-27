@@ -6,8 +6,10 @@ import { registerFontFaces, preloadFonts } from './fonts';
 import { attachInlineEditing } from './field-interaction';
 import {
   FIELD_CONFIGS,
+  DATETIME_STEP_SECONDS,
   formatDateKR,
   formatDateTimeKR,
+  normalizeDateTimeLocalStep,
   parseDateKR,
   parseDateTimeKR,
 } from './field-config';
@@ -85,10 +87,23 @@ function setupPanelToggle(): void {
   });
 }
 
+function setupDateTimeControls(): void {
+  const inputs = formEl.querySelectorAll<HTMLInputElement>('input[type="datetime-local"]');
+  for (const input of inputs) {
+    input.step = String(DATETIME_STEP_SECONDS);
+    const normalize = (): void => {
+      input.value = normalizeDateTimeLocalStep(input.value);
+    };
+    input.addEventListener('change', normalize);
+    input.addEventListener('blur', normalize);
+  }
+}
+
 async function initialize(): Promise<void> {
   setStatus('양식 엔진 초기화 중...');
   registerFontFaces();
   setupPanelToggle();
+  setupDateTimeControls();
 
   // 1) HWP 양식 fetch + 로드
   const { wasm, docInfo } = await loadTemplate(TEMPLATE_URL);

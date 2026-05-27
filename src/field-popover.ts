@@ -6,7 +6,12 @@
  * - 화면 가장자리에서 잘리지 않도록 위치 보정
  */
 
-import { FIELD_CONFIGS, type WidgetConfig } from './field-config';
+import {
+  DATETIME_STEP_SECONDS,
+  FIELD_CONFIGS,
+  normalizeDateTimeLocalStep,
+  type WidgetConfig,
+} from './field-config';
 
 export interface PopoverArgs {
   label: string;
@@ -136,14 +141,27 @@ function createInput(cfg: WidgetConfig, initial: string): HTMLElement {
     return ta;
   }
   const inp = document.createElement('input');
-  if (cfg.type === 'datetime') inp.type = 'datetime-local';
-  else if (cfg.type === 'date') inp.type = 'date';
-  else inp.type = 'text';
+  if (cfg.type === 'datetime') {
+    inp.type = 'datetime-local';
+    inp.step = String(DATETIME_STEP_SECONDS);
+    const normalize = (): void => {
+      inp.value = normalizeDateTimeLocalStep(inp.value);
+    };
+    inp.addEventListener('change', normalize);
+    inp.addEventListener('blur', normalize);
+  } else if (cfg.type === 'date') {
+    inp.type = 'date';
+  } else {
+    inp.type = 'text';
+  }
   inp.value = initial;
   return inp;
 }
 
 function getInputValue(el: HTMLElement): string {
+  if (el instanceof HTMLInputElement && el.type === 'datetime-local') {
+    return normalizeDateTimeLocalStep(el.value);
+  }
   if (el instanceof HTMLSelectElement || el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
     return el.value;
   }

@@ -12,6 +12,8 @@ export type WidgetConfig =
   | { type: 'select'; options: string[] };
 
 const TRANSPORT_OPTIONS = ['자가용', '버스', '기차/KTX', '항공', '지하철', '택시'];
+export const DATETIME_MINUTE_STEP = 10;
+export const DATETIME_STEP_SECONDS = DATETIME_MINUTE_STEP * 60;
 
 export const FIELD_CONFIGS: Record<string, WidgetConfig> = {
   소속: { type: 'text' },
@@ -34,13 +36,30 @@ export const FIELD_CONFIGS: Record<string, WidgetConfig> = {
   첨부서류: { type: 'textarea', rows: 2 },
 };
 
+/** datetime-local 입력값을 가장 가까운 10분 단위로 정규화 */
+export function normalizeDateTimeLocalStep(value: string): string {
+  if (!value) return '';
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2})?$/);
+  if (!match) return value;
+
+  const [, y, m, d, hh, mm] = match;
+  const date = new Date(Number(y), Number(m) - 1, Number(d), 0, 0, 0, 0);
+  if (Number.isNaN(date.getTime())) return value;
+
+  const totalMinutes = Number(hh) * 60 + Number(mm);
+  const snappedMinutes = Math.round(totalMinutes / DATETIME_MINUTE_STEP) * DATETIME_MINUTE_STEP;
+  date.setMinutes(snappedMinutes);
+
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
 /** datetime-local 폼 값 (`2026-05-22T14:00`) → 한국식 (`2026. 05. 22. 14:00`) */
 export function formatDateTimeKR(value: string): string {
   if (!value) return '';
-  const [datePart, timePart = '00:00'] = value.split('T');
-  const [y, m, d] = datePart.split('-');
-  const [hh, mm] = timePart.split(':');
-  return `${y}. ${m}. ${d}. ${hh}:${mm}`;
+  const normalized = normalizeDateTimeLocalStep(value);
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!match) return value;
+  return `${match[1]}. ${match[2]}. ${match[3]}. ${match[4]}:${match[5]}`;
 }
 
 /** date 폼 값 (`2026-05-22`) → 한국식 (`2026. 05. 22.`) */
@@ -80,4 +99,8 @@ export function parseFromHWP(label: string, hwpValue: string): string {
   if (cfg.type === 'datetime') return parseDateTimeKR(hwpValue);
   if (cfg.type === 'date') return parseDateKR(hwpValue);
   return hwpValue;
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
 }
