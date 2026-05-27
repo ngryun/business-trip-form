@@ -108,6 +108,7 @@ async function initialize(): Promise<void> {
 
   // 3) 미리보기 캔버스 마운트
   const canvasView = mountPreview(previewContainer, wasm);
+  (window as any).__dbg = { wasm, canvasView, getFields: () => fields }; // TEMP DEBUG
 
   // 4) 인라인 편집 핸들러 부착
   attachInlineEditing({
