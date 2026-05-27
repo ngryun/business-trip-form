@@ -34,6 +34,10 @@ const formEl = document.getElementById('trip-form') as HTMLFormElement;
 const previewContainer = document.getElementById('scroll-container') as HTMLDivElement;
 const appBodyEl = document.querySelector('.app-body') as HTMLDivElement;
 const toggleBtn = document.getElementById('btn-toggle-panel') as HTMLButtonElement;
+const TRAVEL_DATE_DEFAULTS: Record<string, string> = {
+  시작일시: '갈때일자',
+  종료일시: '올때일자',
+};
 
 function setStatus(message: string, isError = false): void {
   statusEl.textContent = message;
@@ -103,9 +107,14 @@ function setupDateTimeControls(): void {
     fillDateTimeSelect(parts.minuteSelect, DATETIME_MINUTE_OPTIONS, '분', '분');
     setDateTimeControlVisibleValue(control, parts.hidden.value);
 
-    parts.dateInput.addEventListener('change', () => syncDateTimeControlToHidden(control));
-    parts.hourSelect.addEventListener('change', () => syncDateTimeControlToHidden(control));
-    parts.minuteSelect.addEventListener('change', () => syncDateTimeControlToHidden(control));
+    const handleChange = (): void => {
+      syncDateTimeControlToHidden(control);
+      applyTravelDateDefault(control);
+    };
+    parts.dateInput.addEventListener('input', handleChange);
+    parts.dateInput.addEventListener('change', handleChange);
+    parts.hourSelect.addEventListener('change', handleChange);
+    parts.minuteSelect.addEventListener('change', handleChange);
   }
 }
 
@@ -140,6 +149,7 @@ function setDateTimeControlValue(name: string, value: string): void {
     if (control.dataset.datetimePicker === name) {
       setDateTimeControlVisibleValue(control, value);
       syncDateTimeControlToHidden(control);
+      applyTravelDateDefault(control);
       return;
     }
   }
@@ -179,6 +189,18 @@ function fillDateTimeSelect(select: HTMLSelectElement, values: string[], placeho
     option.textContent = `${value}${suffix}`;
     select.appendChild(option);
   }
+}
+
+function applyTravelDateDefault(control: HTMLElement): void {
+  const sourceName = control.dataset.datetimePicker;
+  if (!sourceName) return;
+  const targetName = TRAVEL_DATE_DEFAULTS[sourceName];
+  if (!targetName) return;
+
+  const parts = getDateTimeControlParts(control);
+  const target = formEl.elements.namedItem(targetName) as HTMLInputElement | null;
+  if (!parts || !target || target.value || !parts.dateInput.value) return;
+  target.value = parts.dateInput.value;
 }
 
 async function initialize(): Promise<void> {
