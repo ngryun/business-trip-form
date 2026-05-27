@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>출장신청서 자동작성</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="app-header">
+      <button type="button" id="btn-toggle-panel" class="panel-toggle" aria-label="입력 폼 펼치기/접기" title="입력 폼 펼치기/접기">
+        <span aria-hidden="true">☰</span>
+      </button>
+      <div class="header-text">
+        <h1>출장신청서 자동작성</h1>
+        <p class="subtitle">폼에서 한꺼번에 입력하거나, 미리보기에서 누름틀을 직접 클릭해 수정할 수 있습니다.</p>
+      </div>
+    </header>
+
+    <div class="app-body">
+      <!-- 입력 폼 -->
+      <section class="form-pane" aria-label="입력 폼">
+        <form id="trip-form" autocomplete="off">
+          <fieldset>
+            <legend>신청자 정보</legend>
+            <label>소속 <input name="소속" type="text" required /></label>
+            <label>직급 <input name="직급" type="text" required /></label>
+            <label>성명 <input name="성명" type="text" required /></label>
+          </fieldset>
+
+          <fieldset>
+            <legend>출장 일시 / 장소</legend>
+            <label>시작 일시 <input name="시작일시" type="datetime-local" required /></label>
+            <label>종료 일시 <input name="종료일시" type="datetime-local" required /></label>
+            <label>출장지 <input name="출장지" type="text" required /></label>
+          </fieldset>
+
+          <fieldset>
+            <legend>갈 때</legend>
+            <label>일자 <input name="갈때일자" type="date" required /></label>
+            <label>교통편
+              <select name="갈때교통편" required>
+                <option value="">선택</option>
+                <option>자가용</option>
+                <option>버스</option>
+                <option>기차/KTX</option>
+                <option>항공</option>
+                <option>지하철</option>
+                <option>택시</option>
+              </select>
+            </label>
+            <label>출발지 <input name="갈때출발지" type="text" required /></label>
+            <label>도착지 <input name="갈때도착지" type="text" required /></label>
+          </fieldset>
+
+          <fieldset>
+            <legend>올 때</legend>
+            <label>일자 <input name="올때일자" type="date" required /></label>
+            <label>교통편
+              <select name="올때교통편" required>
+                <option value="">선택</option>
+                <option>자가용</option>
+                <option>버스</option>
+                <option>기차/KTX</option>
+                <option>항공</option>
+                <option>지하철</option>
+                <option>택시</option>
+              </select>
+            </label>
+            <label>출발지 <input name="올때출발지" type="text" required /></label>
+            <label>도착지 <input name="올때도착지" type="text" required /></label>
+          </fieldset>
+
+          <fieldset>
+            <legend>기타</legend>
+            <label>제출 날짜 <input name="제출날짜" type="date" required /></label>
+            <label>첨부서류 (텍스트)
+              <textarea name="첨부서류" rows="3" placeholder="예: 출장 결과보고서, 영수증 등"></textarea>
+            </label>
+          </fieldset>
+
+          <div class="actions">
+            <button type="button" id="btn-apply">미리보기에 반영</button>
+            <button type="button" id="btn-download-hwp">HWP 다운로드</button>
+            <button type="button" id="btn-print">PDF로 저장 / 인쇄</button>
+            <button type="button" id="btn-reset">초기화</button>
+          </div>
+
+          <p class="status" id="status">양식을 불러오는 중...</p>
+        </form>
+      </section>
+
+      <!-- 미리보기 -->
+      <section class="preview-pane" aria-label="미리보기">
+        <div id="scroll-container">
+          <div id="scroll-content"></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
