@@ -881,8 +881,16 @@ function isDarkTextPixel(r: number, g: number, b: number, a: number): boolean {
 }
 
 function findLabelForFieldId(fields: FieldMap, fieldId: number): string | null {
+  const matches: string[] = [];
   for (const [label, entries] of fields) {
-    if (entries.some((e) => e.fieldId === fieldId)) return label;
+    if (entries.some((e) => e.fieldId === fieldId)) matches.push(label);
   }
-  return null;
+  if (matches.length === 0) return null;
+
+  const exactName = matches.find((label) =>
+    FIELD_CONFIGS[label] && fields.get(label)?.some((e) => e.fieldId === fieldId && e.name === label),
+  );
+  if (exactName) return exactName;
+
+  return matches.find((label) => FIELD_CONFIGS[label]) ?? matches[0] ?? null;
 }
