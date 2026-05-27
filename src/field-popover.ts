@@ -136,9 +136,14 @@ function createInput(cfg: WidgetConfig, initial: string): HTMLElement {
     return ta;
   }
   const inp = document.createElement('input');
-  if (cfg.type === 'datetime') inp.type = 'datetime-local';
-  else if (cfg.type === 'date') inp.type = 'date';
-  else inp.type = 'text';
+  if (cfg.type === 'datetime') {
+    inp.type = 'datetime-local';
+    inp.step = '600'; // 10분 단위 (0,10,20,30,40,50)
+  } else if (cfg.type === 'date') {
+    inp.type = 'date';
+  } else {
+    inp.type = 'text';
+  }
   inp.value = initial;
   return inp;
 }
