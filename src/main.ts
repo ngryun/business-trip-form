@@ -22,7 +22,8 @@ import {
  * 양쪽이 같은 setFieldValues / FieldMap 을 공유하므로 어느 쪽으로 수정해도 결과는 동일.
  */
 
-const TEMPLATE_URL = '/templates/business-trip.hwp';
+// GitHub Pages 등 하위 경로 배포 대응 — BASE_URL 기준 상대 경로
+const TEMPLATE_URL = `${import.meta.env.BASE_URL}templates/business-trip.hwp`;
 
 const statusEl = document.getElementById('status') as HTMLParagraphElement;
 const formEl = document.getElementById('trip-form') as HTMLFormElement;

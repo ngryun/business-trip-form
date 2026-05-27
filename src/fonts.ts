@@ -72,6 +72,15 @@ let registered = false;
 const loadedFiles = new Set<string>();
 
 /**
+ * FONT_LIST 의 `/fonts/x.woff2` 경로를 배포 베이스(BASE_URL) 기준으로 변환한다.
+ * - dev: BASE_URL='/' → '/fonts/x.woff2'
+ * - GitHub Pages(base './'): BASE_URL='./' → './fonts/x.woff2' (페이지 하위 경로로 해석)
+ */
+function fontUrl(file: string): string {
+  return import.meta.env.BASE_URL + file.replace(/^\//, '');
+}
+
+/**
  * 페이지 로드 직후 호출. 매핑 테이블의 모든 폰트 패밀리를 @font-face 로 등록만 한다.
  * 실제 다운로드는 브라우저가 텍스트 렌더링 시점에 알아서 한다 (font-display: swap).
  */
@@ -80,7 +89,7 @@ export function registerFontFaces(): void {
   const style = document.createElement('style');
   style.id = 'web-form-font-faces';
   style.textContent = FONT_LIST.map((f) =>
-    `@font-face { font-family: "${f.name}"; src: url("${f.file}") format("woff2"); font-display: swap; }`,
+    `@font-face { font-family: "${f.name}"; src: url("${fontUrl(f.file)}") format("woff2"); font-display: swap; }`,
   ).join('\n');
   document.head.appendChild(style);
   registered = true;
@@ -106,10 +115,11 @@ export async function preloadFonts(docFonts: string[] = []): Promise<void> {
     [...byFile.entries()].map(async ([file, entries]) => {
       try {
         const sample = entries[0];
-        const face = new FontFace(sample.name, `url("${file}") format("woff2")`);
+        const url = fontUrl(file);
+        const face = new FontFace(sample.name, `url("${url}") format("woff2")`);
         await face.load();
         for (const e of entries) {
-          const aliasFace = new FontFace(e.name, `url("${file}") format("woff2")`);
+          const aliasFace = new FontFace(e.name, `url("${url}") format("woff2")`);
           document.fonts.add(await aliasFace.load());
         }
         loadedFiles.add(file);
