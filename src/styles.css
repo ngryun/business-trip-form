@@ -423,6 +423,64 @@ html, body {
 .field-popover__input.datetime-picker:focus {
   outline: 0;
 }
+.field-popover--select {
+  width: 280px;
+}
+.field-popover__select {
+  display: grid;
+  gap: 8px;
+}
+.field-popover__select-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 0;
+  border: 0;
+}
+.field-popover__select-option {
+  min-height: 34px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #111827;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+}
+.field-popover__select-option:hover,
+.field-popover__select-option:focus {
+  outline: 0;
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+.field-popover__select-option.is-selected {
+  background: #2563eb;
+  border-color: #1d4ed8;
+  color: #ffffff;
+}
+.field-popover__select-custom {
+  display: grid;
+  gap: 4px;
+  color: #6b7280;
+  font-size: 12px;
+}
+.field-popover__select-custom-input {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  color: #111827;
+  font-family: inherit;
+  font-size: 13px;
+}
+.field-popover__select-custom-input:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: -1px;
+  border-color: transparent;
+}
 .field-popover--range {
   width: min(840px, calc(100vw - 16px));
   max-width: calc(100vw - 16px);

@@ -41,7 +41,7 @@ export function showFieldPopover(args: PopoverArgs): void {
   if (!cfg) return;
 
   const root = document.createElement('div');
-  root.className = 'field-popover';
+  root.className = `field-popover${cfg.type === 'select' ? ' field-popover--select' : ''}`;
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-label', `${args.label} 입력`);
 
@@ -51,7 +51,7 @@ export function showFieldPopover(args: PopoverArgs): void {
   root.appendChild(titleEl);
 
   const input = createInput(args.label, cfg, args.initialValue);
-  input.classList.add('field-popover__input');
+  if (cfg.type !== 'select') input.classList.add('field-popover__input');
   root.appendChild(input);
 
   const buttons = document.createElement('div');
@@ -81,9 +81,14 @@ export function showFieldPopover(args: PopoverArgs): void {
 
   confirmBtn.addEventListener('click', () => finish(true));
   cancelBtn.addEventListener('click', () => finish(false));
+  input.addEventListener('field-popover-select', () => finish(true));
 
   input.addEventListener('keydown', (e) => {
     const ke = e as KeyboardEvent;
+    const target = ke.target as HTMLElement | null;
+    if (cfg.type === 'select' && ke.key === 'Enter' && target?.closest('.field-popover__select-option')) {
+      return;
+    }
     if (ke.key === 'Enter' && !(input instanceof HTMLTextAreaElement)) {
       ke.preventDefault();
       finish(true);
@@ -190,19 +195,60 @@ export function isPopoverOpen(): boolean {
 
 function createInput(label: string, cfg: WidgetConfig, initial: string): HTMLElement {
   if (cfg.type === 'select') {
-    const sel = document.createElement('select');
-    const blank = document.createElement('option');
-    blank.value = '';
-    blank.textContent = '선택';
-    sel.appendChild(blank);
+    const root = document.createElement('div');
+    root.className = 'field-popover__select';
+    root.dataset.value = initial;
+
+    const options = document.createElement('div');
+    options.className = 'field-popover__select-options';
+    options.setAttribute('role', 'listbox');
+    options.setAttribute('aria-label', `${label} 선택`);
+
+    const hasInitialOption = cfg.options.includes(initial);
     for (const opt of cfg.options) {
-      const o = document.createElement('option');
-      o.value = opt;
-      o.textContent = opt;
-      sel.appendChild(o);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'field-popover__select-option';
+      button.textContent = opt;
+      button.dataset.value = opt;
+      button.setAttribute('role', 'option');
+      button.setAttribute('aria-selected', hasInitialOption && opt === initial ? 'true' : 'false');
+      button.classList.toggle('is-selected', hasInitialOption && opt === initial);
+      button.addEventListener('click', () => {
+        root.dataset.value = opt;
+        const customInput = root.querySelector<HTMLInputElement>('.field-popover__select-custom-input');
+        if (customInput) customInput.value = '';
+        for (const item of options.querySelectorAll<HTMLButtonElement>('.field-popover__select-option')) {
+          const selected = item.dataset.value === opt;
+          item.classList.toggle('is-selected', selected);
+          item.setAttribute('aria-selected', selected ? 'true' : 'false');
+        }
+        root.dispatchEvent(new CustomEvent('field-popover-select', { bubbles: true }));
+      });
+      options.appendChild(button);
     }
-    sel.value = initial;
-    return sel;
+
+    const customLabel = document.createElement('label');
+    customLabel.className = 'field-popover__select-custom';
+    customLabel.textContent = '직접 입력';
+
+    const customInput = document.createElement('input');
+    customInput.type = 'text';
+    customInput.className = 'field-popover__select-custom-input';
+    customInput.value = hasInitialOption ? '' : initial;
+    customInput.placeholder = '교통편 입력';
+    customLabel.appendChild(customInput);
+
+    customInput.addEventListener('input', () => {
+      root.dataset.value = customInput.value.trim();
+      for (const item of options.querySelectorAll<HTMLButtonElement>('.field-popover__select-option')) {
+        item.classList.remove('is-selected');
+        item.setAttribute('aria-selected', 'false');
+      }
+    });
+
+    root.append(options, customLabel);
+    return root;
   }
   if (cfg.type === 'textarea') {
     const ta = document.createElement('textarea');
@@ -241,6 +287,11 @@ function getInputValue(el: HTMLElement): string {
   if (el.classList.contains('datetime-picker')) {
     return getDateTimePickerValue(el);
   }
+  if (el.classList.contains('field-popover__select')) {
+    const custom = el.querySelector<HTMLInputElement>('.field-popover__select-custom-input')?.value.trim();
+    if (custom) return custom;
+    return el.dataset.value ?? '';
+  }
   if (el instanceof HTMLSelectElement || el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
     return el.value;
   }
@@ -250,7 +301,7 @@ function getInputValue(el: HTMLElement): string {
 function focusInput(input: HTMLElement): void {
   const target = input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement || input instanceof HTMLSelectElement
     ? input
-    : input.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('button, input, textarea, select');
+    : input.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement>('button, input, textarea, select');
   if (!target) return;
   target.focus();
   if (target instanceof HTMLInputElement && target.type === 'text') target.select();

@@ -107,7 +107,7 @@ function restoreFormState(): boolean {
       control instanceof HTMLSelectElement ||
       control instanceof HTMLTextAreaElement
     ) {
-      control.value = value;
+      setFormControlValue(control, value);
     }
   }
 
@@ -163,8 +163,28 @@ function syncFormFromInline(label: string, hwpValue: string): void {
   const inputName = label === '이름' ? '성명' : label;
   const input = formEl.elements.namedItem(inputName) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null;
   if (!input) return;
-  if (cfg.type === 'date') input.value = parseDateKR(hwpValue);
-  else input.value = hwpValue;
+  if (cfg.type === 'date') setFormControlValue(input, parseDateKR(hwpValue));
+  else setFormControlValue(input, hwpValue);
+}
+
+function setFormControlValue(
+  control: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
+  value: string,
+): void {
+  if (control instanceof HTMLSelectElement) {
+    ensureSelectOption(control, value);
+  }
+  control.value = value;
+}
+
+function ensureSelectOption(select: HTMLSelectElement, value: string): void {
+  if (!value) return;
+  const exists = Array.from(select.options).some((option) => option.value === value);
+  if (exists) return;
+  const option = document.createElement('option');
+  option.value = value;
+  option.textContent = value;
+  select.appendChild(option);
 }
 
 function setupPanelToggle(): void {
