@@ -243,7 +243,7 @@ function restoreEmptyFieldGuides(wasm: WasmBridge, fields: FieldMap): void {
 }
 
 /**
- * 지정한 fieldId 들의 필드 내용 글자색을 검정(#000000)으로 강제한다.
+ * 지정한 fieldId 들의 필드 내용 서식을 입력값용으로 강제한다.
  *
  * - setFieldValue 직후 호출 — 그 시점에 fieldId 들이 유효함
  * - 각 필드의 startCharIdx/endCharIdx 는 getFieldInfoAt 으로 재조회
@@ -251,14 +251,18 @@ function restoreEmptyFieldGuides(wasm: WasmBridge, fields: FieldMap): void {
  */
 function forceBlackOnFields(wasm: WasmBridge, fieldIds: Set<number>): void {
   if (fieldIds.size === 0) return;
-  const propsJson = JSON.stringify({ textColor: '#000000' });
+  const propsJson = JSON.stringify({
+    fontId: wasm.findOrCreateFontId('맑은 고딕'),
+    italic: false,
+    textColor: '#000000',
+  });
   const list = wasm.getFieldList();
   for (const f of list) {
     if (!fieldIds.has(f.fieldId)) continue;
     try {
       applyBlackToField(wasm, f, propsJson);
     } catch (err) {
-      console.warn(`[field-filler] 글자색 적용 실패 (fieldId=${f.fieldId}, name=${f.name}):`, err);
+      console.warn(`[field-filler] 입력값 서식 적용 실패 (fieldId=${f.fieldId}, name=${f.name}):`, err);
     }
   }
 }
