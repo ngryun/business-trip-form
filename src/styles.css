@@ -60,6 +60,27 @@ html, body {
   padding: 0;
 }
 
+.app-footer {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 4px 14px;
+  border-top: 1px solid #d1d5db;
+  background: #f9fafb;
+  color: #6b7280;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.app-footer a {
+  color: #374151;
+  font-weight: 600;
+  text-decoration: none;
+}
+.app-footer a:hover { text-decoration: underline; }
+
 .form-pane {
   background: #ffffff;
   border-right: 1px solid #e5e7eb;
@@ -615,13 +636,18 @@ html, body {
 .field-popover__cancel:hover { background: #f3f4f6; }
 
 @media print {
-  .app-header, .form-pane, .panel-toggle, .field-popover { display: none; }
+  .app-header, .form-pane, .panel-toggle, .field-popover, .app-footer { display: none; }
   .app-body { grid-template-columns: 1fr; }
   .preview-pane { background: #ffffff; overflow: visible; }
   #scroll-container { overflow: visible; height: auto; }
 }
 
 @media (max-width: 560px) {
+  .app-footer {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 2px 8px;
+  }
   .datetime-picker__panel {
     width: 100%;
     grid-template-columns: 1fr;
