@@ -9,6 +9,13 @@ import { SignatureStampManager, type StoredSignatureStamp } from './signature-st
 import { printPdf, type PdfSaveResult } from './print-pdf';
 import { pushRecentValue } from './recent-values';
 import {
+  buildShareUrl,
+  clearUrlFormValues,
+  copyTextToClipboard,
+  hasUrlFormValues,
+  readUrlFormValues,
+} from './url-share';
+import {
   FIELD_CONFIGS,
   formatDateKR,
   formatDateTimeRange,
@@ -388,6 +395,34 @@ function setFormControlValue(
   control.value = value;
 }
 
+/**
+ * URL 쿼리스트링의 값을 폼 input 들에 채워 넣는다. setupDateTimeControls 보다 먼저 호출해서
+ * 일시 picker 가 초기화 시 hidden input 값을 읽어가게 해야 한다.
+ *
+ * 반환값: 채워 넣은 키가 하나라도 있으면 true (이후 미리보기 자동 반영 트리거에 사용).
+ */
+function applyUrlFormValuesToInputs(): boolean {
+  if (!hasUrlFormValues()) return false;
+  const values = readUrlFormValues();
+  let applied = 0;
+  for (const [name, value] of Object.entries(values)) {
+    const control = formEl.elements.namedItem(name);
+    if (!control) continue;
+    if (control instanceof RadioNodeList) {
+      control.value = value;
+      applied += 1;
+    } else if (
+      control instanceof HTMLInputElement ||
+      control instanceof HTMLSelectElement ||
+      control instanceof HTMLTextAreaElement
+    ) {
+      setFormControlValue(control, value);
+      applied += 1;
+    }
+  }
+  return applied > 0;
+}
+
 function ensureSelectOption(select: HTMLSelectElement, value: string): void {
   if (!value) return;
   const exists = Array.from(select.options).some((option) => option.value === value);
@@ -517,6 +552,8 @@ async function initialize(): Promise<void> {
   registerFontFaces();
   setupPanelToggle();
   const restoredFormState = restoreFormState();
+  // URL 쿼리스트링은 localStorage 복원본보다 우선한다 — 공유받은 URL 의 의도를 존중.
+  const urlFormApplied = applyUrlFormValuesToInputs();
   setDefaultSubmitDate();
   setupDateTimeControls();
   setupReturnLocationDefaults();
@@ -576,7 +613,14 @@ async function initialize(): Promise<void> {
     setFieldValues(wasm, fields, { 올때출발지, 올때도착지 }, { clearEmpty: true });
   }
 
-  if (restoredFormState) {
+  if (urlFormApplied) {
+    // 공유 URL 의 의도를 한 번 더 명확히 — 폼에 반영한 값을 그대로 미리보기에 적용한다.
+    // 이후 자동 저장 로직이 URL 값을 localStorage 에도 보관하므로 새로고침해도 유지된다.
+    applyCollectedValuesToPreview('공유 URL 의 값을 양식에 채웠습니다.');
+    saveFormState();
+    // 주소창의 ?쿼리는 한 번 적용 후 깨끗이 — 두 번째 새로고침부터는 localStorage 가 권위.
+    clearUrlFormValues();
+  } else if (restoredFormState) {
     applyCollectedValuesToPreview('저장된 입력 내용을 복원했습니다.');
   }
 
@@ -750,6 +794,27 @@ async function initialize(): Promise<void> {
       setStatus(`PDF 준비 실패: ${describeError(err)}`, true);
     } finally {
       btn.disabled = false;
+    }
+  });
+
+  document.getElementById('btn-share-url')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-share-url') as HTMLButtonElement | null;
+    if (btn) btn.disabled = true;
+    try {
+      const url = buildShareUrl(collectRawFormValues());
+      const copied = await copyTextToClipboard(url);
+      if (copied) {
+        setStatus(`현재 입력값이 담긴 URL 을 복사했습니다. 공유받은 사람이 열면 같은 값으로 채워져 표시됩니다.`);
+      } else {
+        // 클립보드 권한이 거부됐을 때를 위해 마지막 수단으로 prompt 표시
+        window.prompt('URL 을 직접 복사하세요 (Ctrl/Cmd+C):', url);
+        setStatus('URL 복사 권한이 없어 직접 복사 창을 열었습니다.');
+      }
+    } catch (err) {
+      console.error(err);
+      setStatus(`URL 공유 실패: ${describeError(err)}`, true);
+    } finally {
+      if (btn) btn.disabled = false;
     }
   });
 
