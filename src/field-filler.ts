@@ -179,10 +179,13 @@ export function fillDateTimeRange(wasm: WasmBridge, fields: FieldMap, rangeText:
   if (!rangeText) return;
   const startTargets = fields.get('시작일시') ?? [];
   const endTargets = fields.get('종료일시') ?? [];
+  // 캔버스 미리보기 렌더러가 누름틀 끝 글자를 아주 타이트하게 잘라내는 케이스가 있어
+  // 보이지 않는 끝 공백을 하나 붙여 마지막 실제 글자가 필드 경계에 닿지 않게 한다.
+  const previewSafeRangeText = `${rangeText} `;
 
   const filled = new Set<number>();
   for (const t of startTargets) {
-    const res = wasm.setFieldValue(t.fieldId, rangeText);
+    const res = wasm.setFieldValue(t.fieldId, previewSafeRangeText);
     if (res.ok) filled.add(t.fieldId);
   }
   for (const t of endTargets) {

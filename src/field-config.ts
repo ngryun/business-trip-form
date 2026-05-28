@@ -88,19 +88,19 @@ export function formatDateTimeCompactKR(value: string): string {
  *
  * 미리보기 렌더러가 한 셀에 누름틀이 둘 있으면 두 번째 누름틀 내용을 일정 길이 이후로
  * 잘라버려서(글꼴 크기·정렬·줄바꿈 무관), 시작·종료를 시작일시 누름틀 하나에 모아 넣는다.
- * - 같은 날: 종료는 시간만   → `2026. 05. 22. 14:00 ~ 18:00`
- * - 다른 날: 종료는 연도 생략 → `2026. 05. 22. 14:00 ~ 05. 23. 18:00`
+ * - 같은 날: 종료는 시간만   → `2026. 5.7 14:00 ~ 18:00`
+ * - 다른 날: 종료는 연도 생략 → `2026. 5.7 14:00 ~ 5.8 18:00`
  */
 export function formatDateTimeRange(startValue: string, endValue: string): string {
   const start = getDateTimeParts(startValue);
   if (!start) return '';
-  const startStr = `${start.year}. ${start.month}. ${start.day}. ${start.hour}:${start.minute}`;
+  const startStr = `${start.year}. ${Number(start.month)}.${Number(start.day)} ${start.hour}:${start.minute}`;
   const end = getDateTimeParts(endValue);
   if (!end) return startStr;
   const sameDay = start.year === end.year && start.month === end.month && start.day === end.day;
   const endStr = sameDay
     ? `${end.hour}:${end.minute}`
-    : `${end.month}. ${end.day}. ${end.hour}:${end.minute}`;
+    : `${Number(end.month)}.${Number(end.day)} ${end.hour}:${end.minute}`;
   return `${startStr} ~ ${endStr}`;
 }
 
