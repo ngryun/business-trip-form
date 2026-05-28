@@ -16,6 +16,15 @@ import type { DocumentPosition, FieldInfoResult, HitTestResult } from '@/core/ty
 import { FIELD_CONFIGS, formatDateTimeRange, formatForLabel, parseDateTimeRange, parseFromHWP } from './field-config';
 import { fillDateTimeRange, setFieldValues, type FieldMap } from './field-filler';
 import { closeFieldPopover, isPopoverOpen, showDateTimeRangePopover, showFieldPopover } from './field-popover';
+import { getRecentValues, pushRecentValue } from './recent-values';
+
+/** 라벨별로 "최근 입력" 자동완성을 노출할 가치가 있는 항목만 추적한다 (반복 입력이 잦은 텍스트류). */
+const RECENT_TRACKED_LABELS = new Set([
+  '소속', '직급', '성명', '이름',
+  '출장지',
+  '갈때출발지', '갈때도착지', '올때출발지', '올때도착지',
+  '첨부서류',
+]);
 
 export interface InlineEditDeps {
   wasm: WasmBridge;
@@ -251,6 +260,7 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
       label,
       initialValue: initial,
       anchor,
+      recentValues: RECENT_TRACKED_LABELS.has(label) ? getRecentValues(label) : undefined,
       onConfirm: (raw) => {
         commitSingleField(label, raw);
       },
@@ -272,6 +282,8 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
       console.error('[field-interaction] 적용 실패:', err);
       return false;
     }
+    // 칩 자동완성용 최근 입력 — 원시 폼값(raw) 을 저장해 다음 팝오버에서 그대로 채울 수 있게 한다.
+    if (RECENT_TRACKED_LABELS.has(label)) pushRecentValue(label, raw);
     onAfterEdit(label, value);
     return true;
   }

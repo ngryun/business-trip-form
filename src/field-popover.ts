@@ -12,6 +12,7 @@ import {
 } from './datetime-picker';
 import {
   FIELD_CONFIGS,
+  formatDateKR,
   type WidgetConfig,
 } from './field-config';
 
@@ -20,6 +21,8 @@ export interface PopoverArgs {
   initialValue: string;
   /** 클라이언트 좌표계 기준 누름틀 근처 위치 (보통 클릭한 점) */
   anchor: { x: number; y: number };
+  /** 최근에 같은 라벨에 입력했던 원시 값 목록 (date 는 `YYYY-MM-DD`). 비우면 표시 안 함. */
+  recentValues?: string[];
   onConfirm: (value: string) => void;
   onCancel: () => void;
   onNext?: (value: string) => void;
@@ -56,6 +59,15 @@ export function showFieldPopover(args: PopoverArgs): void {
   if (cfg.type !== 'select' && !input.classList.contains('field-popover__date')) {
     input.classList.add('field-popover__input');
   }
+
+  // 최근 입력 칩: 같은 라벨에 이전에 넣었던 값을 한 번 클릭으로 채워 넣고 바로 확정한다.
+  const recentChips = buildRecentChips(cfg, args.recentValues ?? [], args.initialValue, (raw) => {
+    fillInputValue(input, cfg, raw);
+    // 칩 클릭은 그 값으로 곧장 반영하기로 설계 — 사용자가 "확인" 한 번 더 누를 필요 없이 종료.
+    finish('confirm');
+  });
+  if (recentChips) root.appendChild(recentChips);
+
   root.appendChild(input);
 
   const buttons = document.createElement('div');
@@ -239,6 +251,62 @@ export function closeFieldPopover(): void {
 
 export function isPopoverOpen(): boolean {
   return currentPopover !== null;
+}
+
+function buildRecentChips(
+  cfg: WidgetConfig,
+  values: string[],
+  initial: string,
+  onPick: (raw: string) => void,
+): HTMLElement | null {
+  // 칩으로 노출할 가치가 있는 위젯 타입만 처리한다. select 는 이미 옵션 버튼이 있고,
+  // datetime 은 매번 다른 일시라 도움이 적다.
+  if (!['text', 'textarea', 'date'].includes(cfg.type)) return null;
+  if (values.length === 0) return null;
+
+  const list = values.filter((v) => v && v !== initial);
+  if (list.length === 0) return null;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'field-popover__recent';
+  const heading = document.createElement('span');
+  heading.className = 'field-popover__recent-label';
+  heading.textContent = '최근';
+  wrap.appendChild(heading);
+
+  for (const value of list) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'field-popover__recent-chip';
+    chip.dataset.value = value;
+    chip.textContent = formatChipLabel(cfg, value);
+    chip.title = chip.textContent;
+    chip.addEventListener('click', (e) => {
+      e.preventDefault();
+      onPick(value);
+    });
+    wrap.appendChild(chip);
+  }
+  return wrap;
+}
+
+function formatChipLabel(cfg: WidgetConfig, raw: string): string {
+  if (cfg.type === 'date') return formatDateKR(raw) || raw;
+  return raw;
+}
+
+function fillInputValue(el: HTMLElement, cfg: WidgetConfig, raw: string): void {
+  if (cfg.type === 'date') {
+    const dateInput = el.classList.contains('field-popover__date')
+      ? el.querySelector<HTMLInputElement>('.field-popover__date-input')
+      : el instanceof HTMLInputElement ? el : null;
+    if (dateInput) dateInput.value = raw;
+    return;
+  }
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+    el.value = raw;
+    return;
+  }
 }
 
 function createInput(label: string, cfg: WidgetConfig, initial: string): HTMLElement {

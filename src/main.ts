@@ -7,6 +7,7 @@ import { attachInlineEditing } from './field-interaction';
 import { setupDateTimePicker, type DateTimePickerController } from './datetime-picker';
 import { SignatureStampManager, type StoredSignatureStamp } from './signature-stamp';
 import { printPdf, type PdfSaveResult } from './print-pdf';
+import { pushRecentValue } from './recent-values';
 import {
   FIELD_CONFIGS,
   formatDateKR,
@@ -717,6 +718,7 @@ async function initialize(): Promise<void> {
   document.getElementById('btn-apply')!.addEventListener('click', () => {
     try {
       saveFormState();
+      pushRecentValuesFromForm();
       applyCollectedValuesToPreview('{applied}개 필드에 반영했습니다.', { clearEmpty: true });
     } catch (err) {
       console.error(err);
@@ -769,6 +771,26 @@ async function initialize(): Promise<void> {
     }
     setStatus('초기화했습니다.');
   });
+
+  /**
+   * 사이드 폼에서 "미리보기에 반영" 을 눌렀을 때, 빈칸이 아닌 입력값을 라벨별 "최근 입력" 칩 저장소에
+   * 누적한다. 팝오버에서 직접 입력하는 케이스는 commitSingleField 가 별도로 처리한다.
+   */
+  function pushRecentValuesFromForm(): void {
+    const labels = [
+      '소속', '직급', '성명',
+      '출장지',
+      '갈때출발지', '갈때도착지', '올때출발지', '올때도착지',
+      '첨부서류',
+    ];
+    for (const label of labels) {
+      const control = formEl.elements.namedItem(label);
+      const value = control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement
+        ? control.value.trim()
+        : '';
+      if (value) pushRecentValue(label, value);
+    }
+  }
 }
 
 function suggestFileName(values: Record<string, string>): string {
