@@ -1,7 +1,10 @@
 import type { WasmBridge } from '@/core/wasm-bridge';
 
 const HWPUNIT_PER_PAGE_PX = 75;
-const MAX_NORMALIZED_IMAGE_PX = 640;
+// 도장은 미리보기에서 실제로 ~48 CSS px 정도로 그려진다. 원본 픽셀 폭이 너무 크면 HWP 에
+// 포함되는 PNG 바이너리도 같이 커져 localStorage 5MB(Safari) 같은 작은 쿼터를 쉽게 넘긴다.
+// 320px 정도면 2x 레티나에서도 충분한 품질이라 저장본/문서 양쪽 부담을 모두 줄일 수 있다.
+const MAX_NORMALIZED_IMAGE_PX = 320;
 const TARGET_MARK_TEXT = '(인)';
 const TARGET_FIELD_NAMES = ['성명', '이름'];
 

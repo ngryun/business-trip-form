@@ -296,15 +296,29 @@ function loadStoredSignatureStamp(): StoredSignatureStamp | null {
   }
 }
 
-function saveStoredSignatureStamp(stamp: StoredSignatureStamp): boolean {
+function saveStoredSignatureStamp(stamp: StoredSignatureStamp): { ok: true } | { ok: false; reason: string } {
+  const payload = JSON.stringify({
+    ...stamp,
+    updatedAt: new Date().toISOString(),
+  } satisfies StoredSignatureStamp);
   try {
-    localStorage.setItem(SIGNATURE_STORAGE_KEY, JSON.stringify({
-      ...stamp,
-      updatedAt: new Date().toISOString(),
-    } satisfies StoredSignatureStamp));
-    return true;
-  } catch {
-    return false;
+    localStorage.setItem(SIGNATURE_STORAGE_KEY, payload);
+    return { ok: true };
+  } catch (err) {
+    console.error('[signature] localStorage 저장 실패', err);
+    const sizeKb = Math.round(payload.length / 1024);
+    const quotaLike =
+      (err instanceof DOMException &&
+        (err.name === 'QuotaExceededError' || err.code === 22 || err.code === 1014)) ||
+      /quota/i.test(String((err as { message?: unknown })?.message ?? ''));
+    if (quotaLike) {
+      return {
+        ok: false,
+        reason: `브라우저 저장 용량 부족(${sizeKb}KB). 이미지를 좀 더 작게 만들어 다시 시도해 주세요.`,
+      };
+    }
+    const detail = err instanceof Error ? err.message : String(err);
+    return { ok: false, reason: `브라우저 저장 실패: ${detail || '알 수 없는 오류'}` };
   }
 }
 
@@ -483,6 +497,25 @@ function syncAllDateTimeControlsFromHidden(): void {
   for (const control of formEl.querySelectorAll<HTMLElement>('[data-datetime-picker]')) {
     const hidden = control.querySelector<HTMLInputElement>('input[type="hidden"]');
     dateTimeControllers.get(control)?.setValue(hidden?.value ?? '');
+  }
+}
+
+/**
+ * 모든 일시 picker 를 빈 값으로 강제 초기화한다.
+ *
+ * `<input type="hidden">` 은 일반 입력과 달리 `.value =` 만 해도 defaultValue/attribute 가 함께
+ * 변하기 때문에, `formEl.reset()` 이 이전에 적용된 값을 "기본값" 으로 오해해 그대로 두는 문제가 있다.
+ * 그래서 초기화 시에는 hidden value 와 attribute 를 둘 다 비우고 picker controller 도 빈 상태로 갱신한다.
+ */
+function resetAllDateTimeControls(): void {
+  for (const control of formEl.querySelectorAll<HTMLElement>('[data-datetime-picker]')) {
+    const hidden = control.querySelector<HTMLInputElement>('input[type="hidden"]');
+    if (hidden) {
+      hidden.value = '';
+      hidden.defaultValue = '';
+      hidden.removeAttribute('value');
+    }
+    dateTimeControllers.get(control)?.setValue('');
   }
 }
 
@@ -727,8 +760,9 @@ async function initialize(): Promise<void> {
       setStatus('먼저 도장/서명 이미지를 선택하세요.', true);
       return;
     }
-    if (!saveStoredSignatureStamp(stored)) {
-      setStatus('브라우저 저장소를 사용할 수 없어 도장/서명 이미지를 저장하지 못했습니다.', true);
+    const result = saveStoredSignatureStamp(stored);
+    if (!result.ok) {
+      setStatus(result.reason, true);
       return;
     }
     updateSignatureButtons();
@@ -824,7 +858,9 @@ async function initialize(): Promise<void> {
     autoTravelDates.clear();
     autoReturnLocations.clear();
     clearSavedFormState();
-    syncAllDateTimeControlsFromHidden();
+    // 일시 picker 는 hidden input 의 defaultValue 가 이전 입력값으로 굳어버려 formEl.reset() 만으로는
+    // 비워지지 않는다. 명시적으로 controller + attribute 를 함께 초기화한다.
+    resetAllDateTimeControls();
     setDefaultSubmitDate();
     if (signatureInput) signatureInput.value = '';
     updateSignatureButtons();
