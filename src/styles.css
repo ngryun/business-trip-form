@@ -80,6 +80,38 @@ html, body {
   font-weight: 600;
   color: #374151;
 }
+.applicant-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.applicant-legend-button {
+  padding: 2px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #374151;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+.applicant-legend-button:hover {
+  background: #f3f4f6;
+}
+.applicant-legend-button:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: -1px;
+  border-color: transparent;
+}
+.applicant-legend-button--danger {
+  color: #991b1b;
+  border-color: #fecaca;
+}
+.applicant-legend-button--danger:hover {
+  background: #fef2f2;
+}
 
 .form-pane label {
   display: flex;
@@ -422,6 +454,39 @@ html, body {
 }
 .field-popover__input.datetime-picker:focus {
   outline: 0;
+}
+.field-popover__date {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+.field-popover__date-input {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 14px;
+}
+.field-popover__today-button {
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #374151;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+}
+.field-popover__date-input:focus,
+.field-popover__today-button:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: -1px;
+  border-color: transparent;
+}
+.field-popover__today-button:hover {
+  background: #f3f4f6;
 }
 .field-popover--select {
   width: 280px;

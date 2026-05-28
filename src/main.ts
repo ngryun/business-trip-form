@@ -26,12 +26,22 @@ import {
 // GitHub Pages 등 하위 경로 배포 대응 — BASE_URL 기준 상대 경로
 const TEMPLATE_URL = `${import.meta.env.BASE_URL}templates/business-trip.hwp`;
 const FORM_STORAGE_KEY = 'business-trip-form:form-values:v1';
+const APPLICANT_STORAGE_KEY = 'business-trip-form:applicant-info:v1';
+const APPLICANT_FIELDS = ['소속', '직급', '성명'] as const;
+const APPLICANT_DATALISTS: Record<ApplicantField, string> = {
+  소속: 'applicant-org-options',
+  직급: 'applicant-position-options',
+  성명: 'applicant-name-options',
+};
+const MAX_SAVED_APPLICANTS = 30;
 
 const statusEl = document.getElementById('status') as HTMLParagraphElement;
 const formEl = document.getElementById('trip-form') as HTMLFormElement;
 const previewContainer = document.getElementById('scroll-container') as HTMLDivElement;
 const appBodyEl = document.querySelector('.app-body') as HTMLDivElement;
 const toggleBtn = document.getElementById('btn-toggle-panel') as HTMLButtonElement;
+const applicantSaveBtn = document.getElementById('btn-save-applicant') as HTMLButtonElement | null;
+const applicantClearBtn = document.getElementById('btn-clear-applicants') as HTMLButtonElement | null;
 const TRAVEL_DATE_DEFAULTS: Record<string, string> = {
   시작일시: '갈때일자',
   종료일시: '올때일자',
@@ -45,6 +55,9 @@ interface SavedFormState {
   updatedAt?: string;
   values?: Record<string, string>;
 }
+
+type ApplicantField = typeof APPLICANT_FIELDS[number];
+type SavedApplicantInfo = Record<ApplicantField, string> & { updatedAt: string };
 
 function setStatus(message: string, isError = false): void {
   statusEl.textContent = message;
@@ -85,6 +98,115 @@ function collectFormValues(): Record<string, string> {
 function setupLocalFormPersistence(): void {
   formEl.addEventListener('input', saveFormState);
   formEl.addEventListener('change', saveFormState);
+}
+
+function setupApplicantInfoStorage(): void {
+  refreshApplicantDatalists();
+  applicantSaveBtn?.addEventListener('click', () => {
+    const info = collectApplicantInfo();
+    if (!info) {
+      setStatus('저장할 신청자 정보를 입력하세요.', true);
+      return;
+    }
+
+    const saved = loadApplicantInfos();
+    const next = [
+      info,
+      ...saved.filter((item) => !isSameApplicantInfo(item, info)),
+    ].slice(0, MAX_SAVED_APPLICANTS);
+
+    try {
+      localStorage.setItem(APPLICANT_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      setStatus('브라우저 저장소를 사용할 수 없어 신청자 정보를 저장하지 못했습니다.', true);
+      return;
+    }
+
+    refreshApplicantDatalists(next);
+    saveFormState();
+    setStatus('신청자 정보를 브라우저에 저장했습니다.');
+  });
+
+  applicantClearBtn?.addEventListener('click', () => {
+    try {
+      localStorage.removeItem(APPLICANT_STORAGE_KEY);
+    } catch {
+      setStatus('브라우저 저장소를 사용할 수 없어 저장 목록을 삭제하지 못했습니다.', true);
+      return;
+    }
+
+    refreshApplicantDatalists([]);
+    setStatus('저장된 신청자 정보 목록을 모두 삭제했습니다.');
+  });
+}
+
+function collectApplicantInfo(): SavedApplicantInfo | null {
+  const values = Object.fromEntries(
+    APPLICANT_FIELDS.map((name) => [name, getApplicantInput(name)?.value.trim() ?? '']),
+  ) as Record<ApplicantField, string>;
+  if (!APPLICANT_FIELDS.some((name) => values[name])) return null;
+  return { ...values, updatedAt: new Date().toISOString() };
+}
+
+function getApplicantInput(name: ApplicantField): HTMLInputElement | null {
+  const control = formEl.elements.namedItem(name);
+  return control instanceof HTMLInputElement ? control : null;
+}
+
+function loadApplicantInfos(): SavedApplicantInfo[] {
+  try {
+    const raw = localStorage.getItem(APPLICANT_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) as unknown : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map(normalizeApplicantInfo)
+      .filter((item): item is SavedApplicantInfo => item !== null);
+  } catch {
+    return [];
+  }
+}
+
+function normalizeApplicantInfo(raw: unknown): SavedApplicantInfo | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const item = raw as Partial<Record<ApplicantField | 'updatedAt', unknown>>;
+  const values = Object.fromEntries(
+    APPLICANT_FIELDS.map((name) => [name, typeof item[name] === 'string' ? item[name].trim() : '']),
+  ) as Record<ApplicantField, string>;
+  if (!APPLICANT_FIELDS.some((name) => values[name])) return null;
+  return {
+    ...values,
+    updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : '',
+  };
+}
+
+function refreshApplicantDatalists(applicants = loadApplicantInfos()): void {
+  for (const field of APPLICANT_FIELDS) {
+    const datalist = document.getElementById(APPLICANT_DATALISTS[field]) as HTMLDataListElement | null;
+    if (!datalist) continue;
+    datalist.replaceChildren(
+      ...uniqueApplicantValues(applicants, field).map((value) => {
+        const option = document.createElement('option');
+        option.value = value;
+        return option;
+      }),
+    );
+  }
+}
+
+function uniqueApplicantValues(applicants: SavedApplicantInfo[], field: ApplicantField): string[] {
+  const seen = new Set<string>();
+  const values: string[] = [];
+  for (const item of applicants) {
+    const value = item[field].trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    values.push(value);
+  }
+  return values;
+}
+
+function isSameApplicantInfo(a: SavedApplicantInfo, b: SavedApplicantInfo): boolean {
+  return APPLICANT_FIELDS.every((field) => a[field] === b[field]);
 }
 
 function restoreFormState(): boolean {
@@ -132,6 +254,12 @@ function saveFormState(): void {
 
 function clearSavedFormState(): void {
   try { localStorage.removeItem(FORM_STORAGE_KEY); } catch { /* ignore */ }
+}
+
+function setDefaultSubmitDate(): void {
+  const input = formEl.elements.namedItem('제출날짜') as HTMLInputElement | null;
+  if (!input || input.value) return;
+  input.value = todayDateValue();
 }
 
 function collectRawFormValues(): Record<string, string> {
@@ -263,8 +391,10 @@ async function initialize(): Promise<void> {
   registerFontFaces();
   setupPanelToggle();
   const restoredFormState = restoreFormState();
+  setDefaultSubmitDate();
   setupDateTimeControls();
   setupLocalFormPersistence();
+  setupApplicantInfoStorage();
   await preloadFonts();
 
   // 1) HWP 양식 fetch + 로드
@@ -378,6 +508,7 @@ async function initialize(): Promise<void> {
     autoTravelDates.clear();
     clearSavedFormState();
     syncAllDateTimeControlsFromHidden();
+    setDefaultSubmitDate();
     setStatus('초기화했습니다.');
   });
 }
@@ -395,6 +526,14 @@ function describeError(err: unknown): string {
     return String((err as { message: unknown }).message);
   }
   try { return JSON.stringify(err); } catch { return String(err); }
+}
+
+function todayDateValue(): string {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 initialize().catch((err) => {

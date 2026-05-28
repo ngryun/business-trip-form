@@ -22,11 +22,18 @@
       <!-- 입력 폼 -->
       <section class="form-pane" aria-label="입력 폼">
         <form id="trip-form" autocomplete="off">
-          <fieldset>
-            <legend>신청자 정보</legend>
-            <label>소속 <input name="소속" type="text" required /></label>
-            <label>직급 <input name="직급" type="text" required /></label>
-            <label>성명 <input name="성명" type="text" required /></label>
+          <fieldset class="applicant-fieldset">
+            <legend class="applicant-legend">
+              <span>신청자 정보</span>
+              <button type="button" id="btn-save-applicant" class="applicant-legend-button" title="브라우저에만 저장됩니다">저장</button>
+              <button type="button" id="btn-clear-applicants" class="applicant-legend-button applicant-legend-button--danger">전체 삭제</button>
+            </legend>
+            <label>소속 <input name="소속" type="text" list="applicant-org-options" autocomplete="organization" required /></label>
+            <label>직급 <input name="직급" type="text" list="applicant-position-options" autocomplete="organization-title" required /></label>
+            <label>성명 <input name="성명" type="text" list="applicant-name-options" autocomplete="name" required /></label>
+            <datalist id="applicant-org-options"></datalist>
+            <datalist id="applicant-position-options"></datalist>
+            <datalist id="applicant-name-options"></datalist>
           </fieldset>
 
           <fieldset>
@@ -84,7 +91,7 @@
             <legend>기타</legend>
             <label>제출 날짜 <input name="제출날짜" type="date" required /></label>
             <label>첨부서류 (텍스트)
-              <textarea name="첨부서류" rows="3" placeholder="예: 출장 결과보고서, 영수증 등"></textarea>
+              <textarea name="첨부서류" rows="3" placeholder="예: 주유영수증 1매, 하이패스영수증 1매"></textarea>
             </label>
           </fieldset>
 

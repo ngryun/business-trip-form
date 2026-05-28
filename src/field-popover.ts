@@ -51,7 +51,9 @@ export function showFieldPopover(args: PopoverArgs): void {
   root.appendChild(titleEl);
 
   const input = createInput(args.label, cfg, args.initialValue);
-  if (cfg.type !== 'select') input.classList.add('field-popover__input');
+  if (cfg.type !== 'select' && !input.classList.contains('field-popover__date')) {
+    input.classList.add('field-popover__input');
+  }
   root.appendChild(input);
 
   const buttons = document.createElement('div');
@@ -82,11 +84,15 @@ export function showFieldPopover(args: PopoverArgs): void {
   confirmBtn.addEventListener('click', () => finish(true));
   cancelBtn.addEventListener('click', () => finish(false));
   input.addEventListener('field-popover-select', () => finish(true));
+  input.addEventListener('field-popover-commit', () => finish(true));
 
   input.addEventListener('keydown', (e) => {
     const ke = e as KeyboardEvent;
     const target = ke.target as HTMLElement | null;
     if (cfg.type === 'select' && ke.key === 'Enter' && target?.closest('.field-popover__select-option')) {
+      return;
+    }
+    if (ke.key === 'Enter' && target?.closest('.field-popover__today-button')) {
       return;
     }
     if (ke.key === 'Enter' && !(input instanceof HTMLTextAreaElement)) {
@@ -262,11 +268,36 @@ function createInput(label: string, cfg: WidgetConfig, initial: string): HTMLEle
       inline: true,
     });
   }
+  if (cfg.type === 'date' && label === '제출날짜') {
+    return createSubmitDateInput(initial);
+  }
   const inp = document.createElement('input');
   if (cfg.type === 'date') inp.type = 'date';
   else inp.type = 'text';
   inp.value = initial;
   return inp;
+}
+
+function createSubmitDateInput(initial: string): HTMLElement {
+  const root = document.createElement('div');
+  root.className = 'field-popover__date';
+
+  const input = document.createElement('input');
+  input.type = 'date';
+  input.className = 'field-popover__date-input';
+  input.value = initial;
+
+  const todayBtn = document.createElement('button');
+  todayBtn.type = 'button';
+  todayBtn.className = 'field-popover__today-button';
+  todayBtn.textContent = '오늘';
+  todayBtn.addEventListener('click', () => {
+    input.value = todayDateValue();
+    root.dispatchEvent(new CustomEvent('field-popover-commit', { bubbles: true }));
+  });
+
+  root.append(input, todayBtn);
+  return root;
 }
 
 function createRangeDateTimeField(label: string, initial: string, defaultHour: string): { root: HTMLElement; picker: HTMLElement } {
@@ -292,6 +323,9 @@ function getInputValue(el: HTMLElement): string {
     if (custom) return custom;
     return el.dataset.value ?? '';
   }
+  if (el.classList.contains('field-popover__date')) {
+    return el.querySelector<HTMLInputElement>('.field-popover__date-input')?.value ?? '';
+  }
   if (el instanceof HTMLSelectElement || el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
     return el.value;
   }
@@ -299,6 +333,10 @@ function getInputValue(el: HTMLElement): string {
 }
 
 function focusInput(input: HTMLElement): void {
+  if (input.classList.contains('field-popover__date')) {
+    input.querySelector<HTMLInputElement>('.field-popover__date-input')?.focus();
+    return;
+  }
   const target = input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement || input instanceof HTMLSelectElement
     ? input
     : input.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement>('button, input, textarea, select');
@@ -328,4 +366,12 @@ function positionNear(el: HTMLElement, anchor: { x: number; y: number }): void {
   el.style.left = `${left}px`;
   el.style.top = `${top}px`;
   el.style.visibility = '';
+}
+
+function todayDateValue(): string {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
