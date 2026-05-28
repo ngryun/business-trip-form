@@ -22,6 +22,7 @@ export interface PopoverArgs {
   anchor: { x: number; y: number };
   onConfirm: (value: string) => void;
   onCancel: () => void;
+  onNext?: (value: string) => void;
 }
 
 export interface DateTimeRangePopoverArgs {
@@ -29,6 +30,7 @@ export interface DateTimeRangePopoverArgs {
   endValue: string;
   onCancel: () => void;
   onConfirm: (startValue: string, endValue: string) => void;
+  onNext?: (startValue: string, endValue: string) => void;
   startValue: string;
 }
 
@@ -66,25 +68,39 @@ export function showFieldPopover(args: PopoverArgs): void {
   confirmBtn.type = 'button';
   confirmBtn.className = 'field-popover__confirm';
   confirmBtn.textContent = '확인';
-  buttons.append(cancelBtn, confirmBtn);
+  const nextBtn = document.createElement('button');
+  nextBtn.type = 'button';
+  nextBtn.className = 'field-popover__next';
+  nextBtn.textContent = '다음';
+  if (args.onNext) buttons.append(cancelBtn, nextBtn, confirmBtn);
+  else buttons.append(cancelBtn, confirmBtn);
   root.appendChild(buttons);
 
   document.body.appendChild(root);
   positionNear(root, args.anchor);
 
-  const finish = (commit: boolean): void => {
-    if (commit) {
-      args.onConfirm(getInputValue(input));
-    } else {
+  const finish = (action: 'cancel' | 'confirm' | 'next'): void => {
+    if (action === 'cancel') {
       args.onCancel();
+      closeFieldPopover();
+      return;
     }
+
+    const value = getInputValue(input);
+    if (action === 'next' && args.onNext) {
+      closeFieldPopover();
+      args.onNext(value);
+      return;
+    }
+    args.onConfirm(value);
     closeFieldPopover();
   };
 
-  confirmBtn.addEventListener('click', () => finish(true));
-  cancelBtn.addEventListener('click', () => finish(false));
-  input.addEventListener('field-popover-select', () => finish(true));
-  input.addEventListener('field-popover-commit', () => finish(true));
+  confirmBtn.addEventListener('click', () => finish('confirm'));
+  nextBtn.addEventListener('click', () => finish('next'));
+  cancelBtn.addEventListener('click', () => finish('cancel'));
+  input.addEventListener('field-popover-select', () => finish('confirm'));
+  input.addEventListener('field-popover-commit', () => finish('confirm'));
 
   input.addEventListener('keydown', (e) => {
     const ke = e as KeyboardEvent;
@@ -97,16 +113,19 @@ export function showFieldPopover(args: PopoverArgs): void {
     }
     if (ke.key === 'Enter' && !(input instanceof HTMLTextAreaElement)) {
       ke.preventDefault();
-      finish(true);
+      finish('confirm');
+    } else if (args.onNext && isNextShortcut(ke)) {
+      ke.preventDefault();
+      finish('next');
     } else if (ke.key === 'Escape') {
       ke.preventDefault();
-      finish(false);
+      finish('cancel');
     }
   });
 
   // 외부 클릭 시 취소 — 팝오버 자체를 연 click 이벤트가 곧장 닫지 않도록 다음 틱에 바인딩
   const onOuter = (e: MouseEvent): void => {
-    if (!root.contains(e.target as Node)) finish(false);
+    if (!root.contains(e.target as Node)) finish('cancel');
   };
   setTimeout(() => document.addEventListener('mousedown', onOuter, { capture: true }), 0);
   currentCleanup = () => document.removeEventListener('mousedown', onOuter, { capture: true } as any);
@@ -149,33 +168,51 @@ export function showDateTimeRangePopover(args: DateTimeRangePopoverArgs): void {
   confirmBtn.type = 'button';
   confirmBtn.className = 'field-popover__confirm';
   confirmBtn.textContent = '확인';
-  buttons.append(cancelBtn, confirmBtn);
+  const nextBtn = document.createElement('button');
+  nextBtn.type = 'button';
+  nextBtn.className = 'field-popover__next';
+  nextBtn.textContent = '다음';
+  if (args.onNext) buttons.append(cancelBtn, nextBtn, confirmBtn);
+  else buttons.append(cancelBtn, confirmBtn);
   root.appendChild(buttons);
 
   document.body.appendChild(root);
   positionNear(root, args.anchor);
 
-  const finish = (commit: boolean): void => {
-    if (commit) {
-      args.onConfirm(getDateTimePickerValue(startPicker.picker), getDateTimePickerValue(endPicker.picker));
-    } else {
+  const finish = (action: 'cancel' | 'confirm' | 'next'): void => {
+    if (action === 'cancel') {
       args.onCancel();
+      closeFieldPopover();
+      return;
     }
+
+    const startValue = getDateTimePickerValue(startPicker.picker);
+    const endValue = getDateTimePickerValue(endPicker.picker);
+    if (action === 'next' && args.onNext) {
+      closeFieldPopover();
+      args.onNext(startValue, endValue);
+      return;
+    }
+    args.onConfirm(startValue, endValue);
     closeFieldPopover();
   };
 
-  confirmBtn.addEventListener('click', () => finish(true));
-  cancelBtn.addEventListener('click', () => finish(false));
+  confirmBtn.addEventListener('click', () => finish('confirm'));
+  nextBtn.addEventListener('click', () => finish('next'));
+  cancelBtn.addEventListener('click', () => finish('cancel'));
   root.addEventListener('keydown', (e) => {
     const ke = e as KeyboardEvent;
-    if (ke.key === 'Escape') {
+    if (args.onNext && isNextShortcut(ke)) {
       ke.preventDefault();
-      finish(false);
+      finish('next');
+    } else if (ke.key === 'Escape') {
+      ke.preventDefault();
+      finish('cancel');
     }
   });
 
   const onOuter = (e: MouseEvent): void => {
-    if (!root.contains(e.target as Node)) finish(false);
+    if (!root.contains(e.target as Node)) finish('cancel');
   };
   setTimeout(() => document.addEventListener('mousedown', onOuter, { capture: true }), 0);
   currentCleanup = () => document.removeEventListener('mousedown', onOuter, { capture: true } as any);
@@ -343,6 +380,25 @@ function focusInput(input: HTMLElement): void {
   if (!target) return;
   target.focus();
   if (target instanceof HTMLInputElement && target.type === 'text') target.select();
+}
+
+function isNextShortcut(e: KeyboardEvent): boolean {
+  if (e.key !== 'ArrowRight' || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return false;
+  const target = e.target as HTMLElement | null;
+  if (target instanceof HTMLTextAreaElement) {
+    return isCaretAtEnd(target);
+  }
+  if (target instanceof HTMLInputElement && ['text', 'search', 'tel', 'url', 'email', 'password'].includes(target.type)) {
+    return isCaretAtEnd(target);
+  }
+  return true;
+}
+
+function isCaretAtEnd(input: HTMLInputElement | HTMLTextAreaElement): boolean {
+  const start = input.selectionStart;
+  const end = input.selectionEnd;
+  const length = input.value.length;
+  return (start === length && end === length) || (start === 0 && end === length);
 }
 
 function positionNear(el: HTMLElement, anchor: { x: number; y: number }): void {

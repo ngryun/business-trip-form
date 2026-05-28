@@ -31,7 +31,7 @@ export interface InlineEditDeps {
 interface FieldHit {
   fieldId: number;
   label: string;
-  pos: HitTestResult;
+  pos: HitTestResult | DocumentPosition;
   fi: FieldInfoResult;
 }
 
@@ -57,6 +57,9 @@ interface FieldGeometry {
 
 interface FieldLocationEntry {
   fieldId: number;
+  name?: string;
+  guide?: string;
+  value?: string;
   location: {
     sectionIndex: number;
     paraIndex: number;
@@ -90,7 +93,7 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
     e.preventDefault();
     e.stopPropagation();
     hideHighlight();
-    openPopoverFor(hit, e);
+    openPopoverFor(hit, { x: e.clientX, y: e.clientY });
   };
 
   const onMove = (e: MouseEvent): void => {
@@ -171,29 +174,34 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
     return { fieldId: fi.fieldId, label: resolvedLabel, pos, fi };
   }
 
-  function openPopoverFor(hit: FieldHit, e: MouseEvent): void {
+  function openPopoverFor(hit: FieldHit, anchor: { x: number; y: number }): void {
     const { fieldId, label } = hit;
-    const anchor = { x: e.clientX, y: e.clientY };
 
     // 시작·종료 일시는 시작일시 누름틀에 범위로 합쳐 있으므로, 한쪽만 편집하고 다시 합쳐 넣는다.
     if (label === '시작일시' || label === '종료일시') {
       const rangeRaw = getFields().get('시작일시')?.[0]?.value ?? '';
       const { start, end } = parseDateTimeRange(rangeRaw);
+      const commitRange = (nextStart: string, nextEnd: string): string | null => {
+        const newRange = formatDateTimeRange(nextStart, nextEnd);
+        if (!newRange) return null;
+        try {
+          fillDateTimeRange(wasm, getFields(), newRange);
+        } catch (err) {
+          console.error('[field-interaction] 적용 실패:', err);
+          return null;
+        }
+        onAfterEdit('시작일시', newRange);
+        return newRange;
+      };
       if (isDesktopRangeEditing()) {
         showDateTimeRangePopover({
           startValue: start,
           endValue: end,
           anchor,
-          onConfirm: (nextStart, nextEnd) => {
-            const newRange = formatDateTimeRange(nextStart, nextEnd);
-            if (!newRange) return;
-            try {
-              fillDateTimeRange(wasm, getFields(), newRange);
-            } catch (err) {
-              console.error('[field-interaction] 적용 실패:', err);
-              return;
-            }
-            onAfterEdit('시작일시', newRange);
+          onConfirm: (nextStart, nextEnd) => { commitRange(nextStart, nextEnd); },
+          onNext: (nextStart, nextEnd) => {
+            commitRange(nextStart, nextEnd);
+            openNextEmptyField(fieldId);
           },
           onCancel: () => undefined,
         });
@@ -216,6 +224,20 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
           }
           onAfterEdit(label, newRange);
         },
+        onNext: (raw) => {
+          const newRange = label === '종료일시'
+            ? formatDateTimeRange(start, raw)
+            : formatDateTimeRange(raw, end);
+          if (newRange) {
+            try {
+              fillDateTimeRange(wasm, getFields(), newRange);
+              onAfterEdit(label, newRange);
+            } catch (err) {
+              console.error('[field-interaction] 적용 실패:', err);
+            }
+          }
+          openNextEmptyField(fieldId);
+        },
         onCancel: () => undefined,
       });
       return;
@@ -230,19 +252,125 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
       initialValue: initial,
       anchor,
       onConfirm: (raw) => {
-        const value = formatForLabel(label, raw);
-        if (!value) return; // 빈 값이면 취소처럼 동작
-        try {
-          // setFieldValues 가 forceBlackOnFields + clearGuide 까지 처리한다
-          setFieldValues(wasm, getFields(), { [label]: value });
-        } catch (err) {
-          console.error('[field-interaction] 적용 실패:', err);
-          return;
-        }
-        onAfterEdit(label, value);
+        commitSingleField(label, raw);
+      },
+      onNext: (raw) => {
+        commitSingleField(label, raw);
+        openNextEmptyField(fieldId);
       },
       onCancel: () => undefined,
     });
+  }
+
+  function commitSingleField(label: string, raw: string): boolean {
+    const value = formatForLabel(label, raw);
+    if (!value) return false; // 빈 값이면 취소처럼 동작
+    try {
+      // setFieldValues 가 forceBlackOnFields + clearGuide 까지 처리한다
+      setFieldValues(wasm, getFields(), { [label]: value });
+    } catch (err) {
+      console.error('[field-interaction] 적용 실패:', err);
+      return false;
+    }
+    onAfterEdit(label, value);
+    return true;
+  }
+
+  function openNextEmptyField(fromFieldId: number): void {
+    requestAnimationFrame(() => {
+      const next = findNextEmptyField(fromFieldId);
+      if (!next) return;
+      openFieldNearCurrentView(next);
+    });
+  }
+
+  function findNextEmptyField(fromFieldId: number): FieldHit | null {
+    const items = getOrderedEditableFieldEntries();
+    if (items.length === 0) return null;
+    const currentIndex = items.findIndex((item) => item.entry.fieldId === fromFieldId);
+    const ordered = currentIndex >= 0
+      ? [...items.slice(currentIndex + 1), ...items.slice(0, currentIndex)]
+      : items;
+
+    for (const item of ordered) {
+      if (item.entry.fieldId === fromFieldId) continue;
+      if (!isFieldEmpty(item.label, item.entry)) continue;
+      const hit = buildFieldHit(item.entry, item.label);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  function getOrderedEditableFieldEntries(): Array<{ entry: FieldLocationEntry; label: string }> {
+    const fields = getFields();
+    let list: FieldLocationEntry[];
+    try {
+      list = wasm.getFieldList() as FieldLocationEntry[];
+    } catch {
+      return [];
+    }
+
+    const seen = new Set<number>();
+    const items: Array<{ entry: FieldLocationEntry; label: string }> = [];
+    for (const entry of list) {
+      if (seen.has(entry.fieldId)) continue;
+      seen.add(entry.fieldId);
+      const label = findLabelForFieldId(fields, entry.fieldId);
+      if (!label || !FIELD_CONFIGS[label]) continue;
+      items.push({ entry, label });
+    }
+    return items;
+  }
+
+  function isFieldEmpty(label: string, entry: FieldLocationEntry): boolean {
+    const fields = getFields();
+    if (label === '시작일시' || label === '종료일시') {
+      const rangeRaw = fields.get('시작일시')?.[0]?.value ?? '';
+      const { start, end } = parseDateTimeRange(rangeRaw);
+      return label === '시작일시' ? !start : !end;
+    }
+
+    const latest = fields.get(label)?.find((candidate) => candidate.fieldId === entry.fieldId);
+    return !(latest?.value ?? entry.value ?? '').trim();
+  }
+
+  function buildFieldHit(entry: FieldLocationEntry, label: string): FieldHit | null {
+    const found = findFieldRangeAtLocation(entry);
+    if (!found) return null;
+    return {
+      fieldId: entry.fieldId,
+      label,
+      pos: found.pos,
+      fi: found.fi,
+    };
+  }
+
+  function openFieldNearCurrentView(hit: FieldHit): void {
+    const geometry = getFieldGeometry(hit);
+    const contentRect = geometry ? pageRectToContent(geometry.pageRect) : null;
+    if (!contentRect) return;
+
+    const targetTop = Math.max(0, contentRect.top - container.clientHeight * 0.35);
+    container.scrollTop = targetTop;
+
+    requestAnimationFrame(() => {
+      const anchor = getClientAnchorForField(hit);
+      if (!anchor) return;
+      hideHighlight();
+      openPopoverFor(hit, anchor);
+    });
+  }
+
+  function getClientAnchorForField(hit: FieldHit): { x: number; y: number } | null {
+    const geometry = getFieldGeometry(hit);
+    const contentRect = geometry ? pageRectToContent(geometry.pageRect) : null;
+    if (!contentRect) return null;
+
+    const scrollRect = scrollContent!.getBoundingClientRect();
+    return {
+      x: scrollRect.left + contentRect.left + contentRect.width / 2,
+      y: scrollRect.top + contentRect.top + contentRect.height / 2,
+    };
   }
 
   function resolvePairedDateTimeLabel(

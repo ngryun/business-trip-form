@@ -22,6 +22,14 @@ export type FieldMap = Map<string, FieldEntry[]>;
 /** 시작일시 누름틀에 범위를 합쳐 넣으므로, 종료일시 누름틀은 항상 비운 채로 둔다 (안내문구 복원 금지). */
 const SUPPRESSED_GUIDE_LABELS = new Set(['종료일시']);
 
+interface SetFieldValuesOptions {
+  clearEmpty?: boolean;
+}
+
+interface FillDateTimeRangeOptions {
+  clearEmpty?: boolean;
+}
+
 /**
  * 문서 내 모든 누름틀을 조회하여 label → [FieldEntry, ...] 매핑을 반환한다.
  *
@@ -142,23 +150,25 @@ function deleteFieldGap(
 export function setFieldValues(
   wasm: WasmBridge,
   fields: FieldMap,
-  values: Record<string, string>,
+  values: Record<string, string | null | undefined>,
+  options: SetFieldValuesOptions = {},
 ): { applied: number; missing: string[] } {
   let applied = 0;
   const missing: string[] = [];
   const filledFieldIds = new Set<number>();
   for (const [label, value] of Object.entries(values)) {
-    if (value === '' || value === undefined || value === null) continue;
+    const text = value ?? '';
+    if (!text && !options.clearEmpty) continue;
     const targets = fields.get(label);
     if (!targets || targets.length === 0) {
-      missing.push(label);
+      if (text) missing.push(label);
       continue;
     }
     for (const t of targets) {
-      const res = wasm.setFieldValue(t.fieldId, value);
+      const res = wasm.setFieldValue(t.fieldId, text);
       if (res.ok) {
         applied += 1;
-        filledFieldIds.add(t.fieldId);
+        if (text) filledFieldIds.add(t.fieldId);
       }
     }
   }
@@ -175,10 +185,26 @@ export function setFieldValues(
  * 미리보기 렌더러가 한 셀의 두 번째 누름틀 내용을 잘라먹는 한계를 우회하기 위함.
  * rangeText 가 비어 있으면(시작 미입력) 아무것도 건드리지 않아 기존 안내문구를 유지한다.
  */
-export function fillDateTimeRange(wasm: WasmBridge, fields: FieldMap, rangeText: string): void {
-  if (!rangeText) return;
+export function fillDateTimeRange(
+  wasm: WasmBridge,
+  fields: FieldMap,
+  rangeText: string,
+  options: FillDateTimeRangeOptions = {},
+): void {
   const startTargets = fields.get('시작일시') ?? [];
   const endTargets = fields.get('종료일시') ?? [];
+  if (!rangeText) {
+    if (!options.clearEmpty) return;
+    for (const t of startTargets) {
+      try { wasm.setFieldValue(t.fieldId, ''); } catch { /* noop */ }
+    }
+    for (const t of endTargets) {
+      try { wasm.setFieldValue(t.fieldId, ''); } catch { /* noop */ }
+      clearFieldGuide(wasm, t.fieldId);
+    }
+    restoreEmptyFieldGuides(wasm, fields);
+    return;
+  }
   // 캔버스 미리보기 렌더러가 누름틀 끝 글자를 아주 타이트하게 잘라내는 케이스가 있어
   // 보이지 않는 끝 공백을 하나 붙여 마지막 실제 글자가 필드 경계에 닿지 않게 한다.
   const previewSafeRangeText = `${rangeText} `;

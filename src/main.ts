@@ -5,8 +5,8 @@ import { mountPreview, refreshPreview } from './preview';
 import { registerFontFaces, preloadFonts } from './fonts';
 import { attachInlineEditing } from './field-interaction';
 import { setupDateTimePicker, type DateTimePickerController } from './datetime-picker';
-import { SignatureStampManager } from './signature-stamp';
-import { printPdf } from './print-pdf';
+import { SignatureStampManager, type StoredSignatureStamp } from './signature-stamp';
+import { printPdf, type PdfSaveResult } from './print-pdf';
 import {
   FIELD_CONFIGS,
   formatDateKR,
@@ -29,6 +29,7 @@ import {
 const TEMPLATE_URL = `${import.meta.env.BASE_URL}templates/business-trip.hwp`;
 const FORM_STORAGE_KEY = 'business-trip-form:form-values:v1';
 const APPLICANT_STORAGE_KEY = 'business-trip-form:applicant-info:v1';
+const SIGNATURE_STORAGE_KEY = 'business-trip-form:signature-stamp:v1';
 const APPLICANT_FIELDS = ['소속', '직급', '성명'] as const;
 const APPLICANT_DATALISTS: Record<ApplicantField, string> = {
   소속: 'applicant-org-options',
@@ -46,6 +47,8 @@ const applicantSaveBtn = document.getElementById('btn-save-applicant') as HTMLBu
 const applicantClearBtn = document.getElementById('btn-clear-applicants') as HTMLButtonElement | null;
 const signatureInput = document.getElementById('signature-image') as HTMLInputElement | null;
 const signatureClearBtn = document.getElementById('btn-clear-signature') as HTMLButtonElement | null;
+const signatureSaveBtn = document.getElementById('btn-save-signature') as HTMLButtonElement | null;
+const signatureClearSavedBtn = document.getElementById('btn-clear-saved-signature') as HTMLButtonElement | null;
 const TRAVEL_DATE_DEFAULTS: Record<string, string> = {
   시작일시: '갈때일자',
   종료일시: '올때일자',
@@ -53,6 +56,10 @@ const TRAVEL_DATE_DEFAULTS: Record<string, string> = {
 const dateTimeControllers = new WeakMap<HTMLElement, DateTimePickerController>();
 const autoTravelDates = new Map<string, string>();
 let liveDateTimePreviewHandler: (() => void) | null = null;
+
+interface PreviewApplyOptions {
+  clearEmpty?: boolean;
+}
 
 interface SavedFormState {
   autoTravelDates?: Record<string, string>;
@@ -260,6 +267,66 @@ function clearSavedFormState(): void {
   try { localStorage.removeItem(FORM_STORAGE_KEY); } catch { /* ignore */ }
 }
 
+function loadStoredSignatureStamp(): StoredSignatureStamp | null {
+  try {
+    const raw = localStorage.getItem(SIGNATURE_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) as unknown : null;
+    return normalizeStoredSignatureStamp(parsed);
+  } catch {
+    return null;
+  }
+}
+
+function saveStoredSignatureStamp(stamp: StoredSignatureStamp): boolean {
+  try {
+    localStorage.setItem(SIGNATURE_STORAGE_KEY, JSON.stringify({
+      ...stamp,
+      updatedAt: new Date().toISOString(),
+    } satisfies StoredSignatureStamp));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearStoredSignatureStamp(): boolean {
+  try {
+    localStorage.removeItem(SIGNATURE_STORAGE_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function hasStoredSignatureStamp(): boolean {
+  try {
+    return localStorage.getItem(SIGNATURE_STORAGE_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeStoredSignatureStamp(raw: unknown): StoredSignatureStamp | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const item = raw as Partial<StoredSignatureStamp>;
+  if (
+    item.mime !== 'image/png' ||
+    typeof item.dataUrl !== 'string' ||
+    !item.dataUrl.startsWith('data:image/png;base64,') ||
+    typeof item.widthPx !== 'number' ||
+    typeof item.heightPx !== 'number'
+  ) {
+    return null;
+  }
+  return {
+    mime: 'image/png',
+    dataUrl: item.dataUrl,
+    widthPx: Math.max(1, Math.round(item.widthPx)),
+    heightPx: Math.max(1, Math.round(item.heightPx)),
+    updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : '',
+  };
+}
+
 function setDefaultSubmitDate(): void {
   const input = formEl.elements.namedItem('제출날짜') as HTMLInputElement | null;
   if (!input || input.value) return;
@@ -425,10 +492,16 @@ async function initialize(): Promise<void> {
   // 3) 미리보기 캔버스 마운트
   const canvasView = mountPreview(previewContainer, wasm);
   const signatureStamp = new SignatureStampManager(wasm);
-  function applyCollectedValuesToPreview(statusMessage?: string): void {
+  updateSignatureButtons();
+  function applyCollectedValuesToPreview(
+    statusMessage?: string,
+    options: PreviewApplyOptions = {},
+  ): void {
     const { 시작일시: rangeText, ...values } = collectFormValues();
-    const { applied, missing } = setFieldValues(wasm, fields, values);
-    fillDateTimeRange(wasm, fields, rangeText);
+    const { applied, missing } = setFieldValues(wasm, fields, values, {
+      clearEmpty: options.clearEmpty,
+    });
+    fillDateTimeRange(wasm, fields, rangeText, { clearEmpty: options.clearEmpty });
     realignSignatureStamp();
     refreshPreview(wasm);
     fields = discoverFields(wasm);
@@ -446,24 +519,49 @@ async function initialize(): Promise<void> {
     applyCollectedValuesToPreview('저장된 입력 내용을 복원했습니다.');
   }
 
+  const storedSignatureStamp = loadStoredSignatureStamp();
+  if (storedSignatureStamp) {
+    try {
+      signatureStamp.applyStored(storedSignatureStamp);
+      refreshPreview(wasm);
+      updateSignatureButtons();
+      setStatus('브라우저에 저장된 도장/서명 이미지를 복원했습니다.');
+    } catch (err) {
+      console.warn('[web-form] 저장된 도장/서명 이미지 복원 실패:', err);
+      clearStoredSignatureStamp();
+      updateSignatureButtons();
+      setStatus('저장된 도장/서명 이미지를 불러오지 못해 저장본을 삭제했습니다.', true);
+    }
+  }
+
   let livePreviewTimer = 0;
-  liveDateTimePreviewHandler = () => {
+  function scheduleLivePreview(statusMessage = '입력 내용을 미리보기에 반영했습니다.'): void {
     window.clearTimeout(livePreviewTimer);
     livePreviewTimer = window.setTimeout(() => {
       try {
-        const { 시작일시: rangeText, 갈때일자, 올때일자 } = collectFormValues();
-        setFieldValues(wasm, fields, { 갈때일자, 올때일자 });
-        fillDateTimeRange(wasm, fields, rangeText);
-        refreshPreview(wasm);
-        fields = discoverFields(wasm);
         saveFormState();
-        setStatus('일시와 이동 일자를 미리보기에 반영했습니다.');
+        applyCollectedValuesToPreview(statusMessage, { clearEmpty: true });
       } catch (err) {
         console.error(err);
-        setStatus(`일시 반영 실패: ${(err as Error).message}`, true);
+        setStatus(`미리보기 반영 실패: ${(err as Error).message}`, true);
       }
-    }, 80);
+    }, 120);
+  }
+
+  liveDateTimePreviewHandler = () => {
+    scheduleLivePreview();
   };
+
+  formEl.addEventListener('input', (event) => {
+    const target = event.target;
+    if (target instanceof HTMLInputElement && target.type === 'file') return;
+    scheduleLivePreview();
+  });
+  formEl.addEventListener('change', (event) => {
+    const target = event.target;
+    if (target instanceof HTMLInputElement && target.type === 'file') return;
+    scheduleLivePreview();
+  });
 
   // 4) 인라인 편집 핸들러 부착
   attachInlineEditing({
@@ -493,12 +591,12 @@ async function initialize(): Promise<void> {
     try {
       await signatureStamp.applyFile(file);
       refreshPreview(wasm);
-      if (signatureClearBtn) signatureClearBtn.disabled = !signatureStamp.hasStamp();
-      setStatus('도장/서명 이미지를 성명 옆 (인)에 넣었습니다.');
+      updateSignatureButtons();
+      setStatus('도장/서명 이미지를 성명 옆 (인)에 넣었습니다. 계속 쓰려면 브라우저 저장을 누르세요.');
     } catch (err) {
       console.error(err);
       signatureInput.value = '';
-      if (signatureClearBtn) signatureClearBtn.disabled = true;
+      updateSignatureButtons();
       setStatus(`도장/서명 이미지 적용 실패: ${describeError(err)}`, true);
     }
   });
@@ -506,13 +604,36 @@ async function initialize(): Promise<void> {
   signatureClearBtn?.addEventListener('click', () => {
     const removed = signatureStamp.clear();
     if (signatureInput) signatureInput.value = '';
-    signatureClearBtn.disabled = true;
+    updateSignatureButtons();
     if (removed) {
       refreshPreview(wasm);
-      setStatus('도장/서명 이미지를 삭제했습니다.');
+      setStatus('문서에서 도장/서명 이미지를 삭제했습니다. 브라우저 저장본은 유지됩니다.');
     } else {
       setStatus('삭제할 도장/서명 이미지가 없습니다.');
     }
+  });
+
+  signatureSaveBtn?.addEventListener('click', () => {
+    const stored = signatureStamp.getStoredStamp();
+    if (!stored) {
+      setStatus('먼저 도장/서명 이미지를 선택하세요.', true);
+      return;
+    }
+    if (!saveStoredSignatureStamp(stored)) {
+      setStatus('브라우저 저장소를 사용할 수 없어 도장/서명 이미지를 저장하지 못했습니다.', true);
+      return;
+    }
+    updateSignatureButtons();
+    setStatus('도장/서명 이미지를 브라우저에 저장했습니다.');
+  });
+
+  signatureClearSavedBtn?.addEventListener('click', () => {
+    if (!clearStoredSignatureStamp()) {
+      setStatus('브라우저 저장소를 사용할 수 없어 저장된 이미지를 삭제하지 못했습니다.', true);
+      return;
+    }
+    updateSignatureButtons();
+    setStatus('브라우저에 저장된 도장/서명 이미지를 삭제했습니다.');
   });
 
   function realignSignatureStamp(): void {
@@ -524,10 +645,16 @@ async function initialize(): Promise<void> {
     }
   }
 
+  function updateSignatureButtons(): void {
+    if (signatureClearBtn) signatureClearBtn.disabled = !signatureStamp.hasStamp();
+    if (signatureSaveBtn) signatureSaveBtn.disabled = !signatureStamp.getStoredStamp();
+    if (signatureClearSavedBtn) signatureClearSavedBtn.disabled = !hasStoredSignatureStamp();
+  }
+
   document.getElementById('btn-apply')!.addEventListener('click', () => {
     try {
       saveFormState();
-      applyCollectedValuesToPreview('{applied}개 필드에 반영했습니다.');
+      applyCollectedValuesToPreview('{applied}개 필드에 반영했습니다.', { clearEmpty: true });
     } catch (err) {
       console.error(err);
       setStatus(`반영 실패: ${(err as Error).message}`, true);
@@ -549,12 +676,13 @@ async function initialize(): Promise<void> {
     const btn = document.getElementById('btn-print') as HTMLButtonElement;
     btn.disabled = true;
     try {
-      setStatus('인쇄용 페이지를 준비 중...');
-      await printPdf(wasm);
-      setStatus('인쇄 다이얼로그를 열었습니다. 모바일은 공유 시트에서 PDF 로 저장할 수 있습니다.');
+      const fileName = suggestPdfFileName(collectFormValues());
+      setStatus('PDF를 준비 중...');
+      const result = await printPdf(wasm, fileName);
+      setStatus(describePdfSaveResult(result, fileName));
     } catch (err) {
       console.error(err);
-      setStatus(`인쇄 준비 실패: ${describeError(err)}`, true);
+      setStatus(`PDF 준비 실패: ${describeError(err)}`, true);
     } finally {
       btn.disabled = false;
     }
@@ -568,8 +696,13 @@ async function initialize(): Promise<void> {
     syncAllDateTimeControlsFromHidden();
     setDefaultSubmitDate();
     if (signatureInput) signatureInput.value = '';
-    if (signatureClearBtn) signatureClearBtn.disabled = true;
-    if (removedStamp) refreshPreview(wasm);
+    updateSignatureButtons();
+    try {
+      applyCollectedValuesToPreview(undefined, { clearEmpty: true });
+    } catch (err) {
+      console.error(err);
+      if (removedStamp) refreshPreview(wasm);
+    }
     setStatus('초기화했습니다.');
   });
 }
@@ -578,6 +711,26 @@ function suggestFileName(values: Record<string, string>): string {
   const date = values.제출날짜.replace(/[. ]/g, '').slice(0, 8) || 'undated';
   const who = (values.성명 || 'anonymous').replace(/\s/g, '');
   return `출장신청서_${who}_${date}.hwp`;
+}
+
+function suggestPdfFileName(values: Record<string, string>): string {
+  return suggestFileName(values).replace(/\.hwp$/i, '.pdf');
+}
+
+function describePdfSaveResult(result: PdfSaveResult, fileName: string): string {
+  switch (result) {
+    case 'shared':
+      return `PDF 공유/저장 시트를 열었습니다: ${fileName}`;
+    case 'downloaded':
+      return `PDF 저장을 시작했습니다: ${fileName}`;
+    case 'opened':
+      return 'PDF를 새 화면으로 열었습니다. 공유 버튼에서 파일에 저장할 수 있습니다.';
+    case 'cancelled':
+      return 'PDF 저장을 취소했습니다.';
+    case 'printed':
+    default:
+      return '인쇄 다이얼로그를 열었습니다. 데스크톱에서는 여기서 PDF로 저장할 수 있습니다.';
+  }
 }
 
 function describeError(err: unknown): string {

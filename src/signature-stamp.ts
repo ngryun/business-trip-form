@@ -17,6 +17,14 @@ interface PreparedImage {
   heightPx: number;
 }
 
+export interface StoredSignatureStamp {
+  mime: 'image/png';
+  dataUrl: string;
+  widthPx: number;
+  heightPx: number;
+  updatedAt?: string;
+}
+
 interface PageRect {
   pageIndex: number;
   x: number;
@@ -45,19 +53,38 @@ interface FieldLocationPathEntry {
 export class SignatureStampManager {
   private ref: StampRef | null = null;
   private size: { width: number; height: number } | null = null;
+  private stored: StoredSignatureStamp | null = null;
 
   constructor(private wasm: WasmBridge) {}
 
-  async applyFile(file: File): Promise<void> {
+  async applyFile(file: File): Promise<StoredSignatureStamp> {
     if (!file.type.startsWith('image/')) {
       throw new Error('이미지 파일을 선택해 주세요.');
     }
 
     const image = await prepareImage(file);
+    const stored = preparedImageToStored(image);
+    this.applyPreparedImage(image, stored);
+    return stored;
+  }
+
+  applyStored(stored: StoredSignatureStamp): void {
+    this.applyPreparedImage(storedSignatureToPreparedImage(stored), {
+      ...stored,
+      updatedAt: stored.updatedAt || new Date().toISOString(),
+    });
+  }
+
+  getStoredStamp(): StoredSignatureStamp | null {
+    return this.stored;
+  }
+
+  private applyPreparedImage(image: PreparedImage, stored: StoredSignatureStamp): void {
     this.clear();
 
     const size = fitStampSize(image.widthPx, image.heightPx);
     this.size = size;
+    this.stored = stored;
     this.ref = this.insertPlaceholder(image, size);
 
     try {
@@ -101,6 +128,7 @@ export class SignatureStampManager {
     const { sec, paraIdx, controlIdx } = this.ref;
     this.ref = null;
     this.size = null;
+    this.stored = null;
     try {
       const result = this.wasm.deletePictureControl(sec, paraIdx, controlIdx);
       this.wasm.refreshLayout();
@@ -233,6 +261,49 @@ function fitStampSize(widthPx: number, heightPx: number): { width: number; heigh
     width: Math.max(12, widthPx * scale),
     height: Math.max(12, heightPx * scale),
   };
+}
+
+function preparedImageToStored(image: PreparedImage): StoredSignatureStamp {
+  return {
+    mime: 'image/png',
+    dataUrl: `data:image/png;base64,${uint8ToBase64(image.data)}`,
+    widthPx: image.widthPx,
+    heightPx: image.heightPx,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function storedSignatureToPreparedImage(stored: StoredSignatureStamp): PreparedImage {
+  if (stored.mime !== 'image/png' || !stored.dataUrl.startsWith('data:image/png;base64,')) {
+    throw new Error('저장된 도장/서명 이미지 형식이 올바르지 않습니다.');
+  }
+  const widthPx = Math.max(1, Math.round(Number(stored.widthPx) || 0));
+  const heightPx = Math.max(1, Math.round(Number(stored.heightPx) || 0));
+  return {
+    data: base64DataUrlToUint8(stored.dataUrl),
+    widthPx,
+    heightPx,
+  };
+}
+
+function uint8ToBase64(data: Uint8Array): string {
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let i = 0; i < data.length; i += chunkSize) {
+    const chunk = data.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+function base64DataUrlToUint8(dataUrl: string): Uint8Array {
+  const base64 = dataUrl.slice('data:image/png;base64,'.length);
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
 }
 
 function findSignatureTarget(wasm: WasmBridge): PageRect | null {

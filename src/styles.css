@@ -144,7 +144,12 @@ html, body {
   min-width: 0;
   font-size: 12px;
 }
-.signature-control__clear {
+.signature-control__actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.signature-control__button {
   padding: 6px 10px;
   border: 1px solid #d1d5db;
   border-radius: 4px;
@@ -154,12 +159,19 @@ html, body {
   font-size: 12px;
   cursor: pointer;
 }
-.signature-control__clear:hover:not(:disabled) {
+.signature-control__button:hover:not(:disabled) {
   background: #f3f4f6;
 }
-.signature-control__clear:disabled {
+.signature-control__button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+.signature-control__button--danger {
+  color: #991b1b;
+  border-color: #fecaca;
+}
+.signature-control__button--danger:hover:not(:disabled) {
+  background: #fef2f2;
 }
 
 .form-pane label {
@@ -660,7 +672,13 @@ html, body {
   color: #fff !important;
   border-color: #1d4ed8 !important;
 }
+.field-popover__next {
+  background: #eef2ff !important;
+  color: #3730a3 !important;
+  border-color: #c7d2fe !important;
+}
 .field-popover__confirm:hover { background: #1d4ed8 !important; }
+.field-popover__next:hover { background: #e0e7ff !important; }
 .field-popover__cancel:hover { background: #f3f4f6; }
 
 @media print {
