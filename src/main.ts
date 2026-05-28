@@ -5,6 +5,7 @@ import { mountPreview, refreshPreview } from './preview';
 import { registerFontFaces, preloadFonts } from './fonts';
 import { attachInlineEditing } from './field-interaction';
 import { setupDateTimePicker, type DateTimePickerController } from './datetime-picker';
+import { SignatureStampManager } from './signature-stamp';
 import {
   FIELD_CONFIGS,
   formatDateKR,
@@ -42,6 +43,8 @@ const appBodyEl = document.querySelector('.app-body') as HTMLDivElement;
 const toggleBtn = document.getElementById('btn-toggle-panel') as HTMLButtonElement;
 const applicantSaveBtn = document.getElementById('btn-save-applicant') as HTMLButtonElement | null;
 const applicantClearBtn = document.getElementById('btn-clear-applicants') as HTMLButtonElement | null;
+const signatureInput = document.getElementById('signature-image') as HTMLInputElement | null;
+const signatureClearBtn = document.getElementById('btn-clear-signature') as HTMLButtonElement | null;
 const TRAVEL_DATE_DEFAULTS: Record<string, string> = {
   시작일시: '갈때일자',
   종료일시: '올때일자',
@@ -420,10 +423,12 @@ async function initialize(): Promise<void> {
 
   // 3) 미리보기 캔버스 마운트
   const canvasView = mountPreview(previewContainer, wasm);
+  const signatureStamp = new SignatureStampManager(wasm);
   function applyCollectedValuesToPreview(statusMessage?: string): void {
     const { 시작일시: rangeText, ...values } = collectFormValues();
     const { applied, missing } = setFieldValues(wasm, fields, values);
     fillDateTimeRange(wasm, fields, rangeText);
+    realignSignatureStamp();
     refreshPreview(wasm);
     fields = discoverFields(wasm);
     if (!statusMessage) return;
@@ -470,6 +475,9 @@ async function initialize(): Promise<void> {
       if (label === '시작일시' || label === '종료일시') {
         applyTravelDatesToPreview();
       }
+      if (label === '성명' || label === '이름') {
+        realignSignatureStamp();
+      }
       refreshPreview(wasm);
       fields = discoverFields(wasm);
       saveFormState();
@@ -478,6 +486,43 @@ async function initialize(): Promise<void> {
   });
 
   // 5) 액션 버튼 바인딩
+  signatureInput?.addEventListener('change', async () => {
+    const file = signatureInput.files?.[0];
+    if (!file) return;
+    try {
+      await signatureStamp.applyFile(file);
+      refreshPreview(wasm);
+      if (signatureClearBtn) signatureClearBtn.disabled = !signatureStamp.hasStamp();
+      setStatus('도장/서명 이미지를 성명 옆 (인)에 넣었습니다.');
+    } catch (err) {
+      console.error(err);
+      signatureInput.value = '';
+      if (signatureClearBtn) signatureClearBtn.disabled = true;
+      setStatus(`도장/서명 이미지 적용 실패: ${describeError(err)}`, true);
+    }
+  });
+
+  signatureClearBtn?.addEventListener('click', () => {
+    const removed = signatureStamp.clear();
+    if (signatureInput) signatureInput.value = '';
+    signatureClearBtn.disabled = true;
+    if (removed) {
+      refreshPreview(wasm);
+      setStatus('도장/서명 이미지를 삭제했습니다.');
+    } else {
+      setStatus('삭제할 도장/서명 이미지가 없습니다.');
+    }
+  });
+
+  function realignSignatureStamp(): void {
+    if (!signatureStamp.hasStamp()) return;
+    try {
+      signatureStamp.realign();
+    } catch (err) {
+      console.warn('[web-form] 도장/서명 위치 재정렬 실패:', err);
+    }
+  }
+
   document.getElementById('btn-apply')!.addEventListener('click', () => {
     try {
       saveFormState();
@@ -504,11 +549,15 @@ async function initialize(): Promise<void> {
   });
 
   document.getElementById('btn-reset')!.addEventListener('click', () => {
+    const removedStamp = signatureStamp.clear();
     formEl.reset();
     autoTravelDates.clear();
     clearSavedFormState();
     syncAllDateTimeControlsFromHidden();
     setDefaultSubmitDate();
+    if (signatureInput) signatureInput.value = '';
+    if (signatureClearBtn) signatureClearBtn.disabled = true;
+    if (removedStamp) refreshPreview(wasm);
     setStatus('초기화했습니다.');
   });
 }

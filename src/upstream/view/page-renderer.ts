@@ -85,10 +85,12 @@ export class PageRenderer {
 
     // BehindText 가 있는 페이지는 flow Canvas 를 투명 배경으로 두고,
     // 별도 페이지 배경 layer → BehindText → flow Canvas 순서로 합성한다.
-    // Canvas 내부의 흰 배경은 WASM flow 렌더에서 생략된다.
+    // 'flow' 렌더가 페이지 배경 흰색을 그대로 칠하는 경우가 있어 mix-blend-mode: multiply 로
+    // 흰색을 시각상 통과시켜 BehindText 가 보이게 한다 (글자(검정/짙은 색)는 그대로 표시).
     if (behind.length > 0) {
       canvas.style.background = 'transparent';
       canvas.style.zIndex = '2';
+      canvas.style.mixBlendMode = 'multiply';
 
       const background = document.createElement('div');
       background.dataset.rhwpOverlay = `background-${pageIdx}`;
@@ -100,6 +102,7 @@ export class PageRenderer {
     } else {
       canvas.style.background = '';
       canvas.style.zIndex = front.length > 0 ? '1' : '';
+      canvas.style.mixBlendMode = '';
     }
 
     // BehindText overlay (Canvas 뒤)

@@ -133,6 +133,34 @@ html, body {
 .applicant-legend-button--danger:hover {
   background: #fef2f2;
 }
+.signature-control__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+}
+.signature-control input[type="file"] {
+  min-width: 0;
+  font-size: 12px;
+}
+.signature-control__clear {
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #374151;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.signature-control__clear:hover:not(:disabled) {
+  background: #f3f4f6;
+}
+.signature-control__clear:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
 
 .form-pane label {
   display: flex;
