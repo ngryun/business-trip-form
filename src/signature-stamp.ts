@@ -56,9 +56,9 @@ export class SignatureStampManager {
     const image = await prepareImage(file);
     this.clear();
 
-    const inserted = this.insertPlaceholder(image);
-    this.ref = inserted;
-    this.size = fitStampSize(image.widthPx, image.heightPx);
+    const size = fitStampSize(image.widthPx, image.heightPx);
+    this.size = size;
+    this.ref = this.insertPlaceholder(image, size);
 
     try {
       if (!this.realign()) throw new Error('성명 옆 (인) 위치를 찾지 못했습니다.');
@@ -70,29 +70,27 @@ export class SignatureStampManager {
 
   realign(): boolean {
     if (!this.ref || !this.size) return false;
-    // 위치 탐색 전 임시로 페이지 좌상단(0,0)에 두어 origin 측정의 기준점을 안정시킨다.
-    this.setPlaceholderProperties(this.ref);
+    // 현재 그림의 페이지 좌표 / 현재 오프셋과 목표 위치(target)의 차이로 새 오프셋을 계산한다.
+    // 예전엔 위치 탐색 전 picture 를 (0,0) 으로 초기화해서 origin 을 안정화했는데, 그러면
+    // 폼 값 입력 후 누름틀의 name 이 비어 target 탐색이 실패할 때 그림이 (0,0) 으로 박혀버린다.
+    // 현재 위치를 그대로 두고 보정만 더한다.
     this.wasm.refreshLayout();
-
-    const origin = this.findPictureLayout(this.ref);
+    const current = this.findPictureLayout(this.ref);
     const target = findSignatureTarget(this.wasm);
-    if (!origin || !target || origin.pageIndex !== target.pageIndex) return false;
+    if (!current || !target || current.pageIndex !== target.pageIndex) return false;
+
+    const props = this.wasm.getPictureProperties(this.ref.sec, this.ref.paraIdx, this.ref.controlIdx);
+    const currentHorzPx = props.horzOffset / HWPUNIT_PER_PAGE_PX;
+    const currentVertPx = props.vertOffset / HWPUNIT_PER_PAGE_PX;
 
     const left = target.x + target.width / 2 - this.size.width / 2;
     const top = target.y + target.height / 2 - this.size.height / 2;
-    const result = this.wasm.setPictureProperties(this.ref.sec, this.ref.paraIdx, this.ref.controlIdx, {
-      width: pagePxToHwpUnit(this.size.width),
-      height: pagePxToHwpUnit(this.size.height),
-      treatAsChar: false,
-      textWrap: 'BehindText',
-      horzRelTo: 'Page',
-      vertRelTo: 'Page',
-      horzAlign: 'Left',
-      vertAlign: 'Top',
-      horzOffset: pagePxToHwpUnit(left - origin.x),
-      vertOffset: pagePxToHwpUnit(top - origin.y),
-      description: 'signature-stamp',
-    });
+    const result = this.setStampProperties(
+      this.ref,
+      this.size,
+      currentHorzPx + (left - current.x),
+      currentVertPx + (top - current.y),
+    );
     if (!result.ok) return false;
     this.wasm.refreshLayout();
     return true;
@@ -116,7 +114,11 @@ export class SignatureStampManager {
     return this.ref !== null;
   }
 
-  private insertPlaceholder(image: PreparedImage): StampRef {
+  private insertPlaceholder(image: PreparedImage, size: { width: number; height: number }): StampRef {
+    // 픽처를 실제 크기(HWPUNIT)로 한 번에 넣으면, 그 그림이 들어간 문단이 본문 페이지 흐름을 한 줄만큼
+    // 밀어 (인) 가 다음 페이지로 넘어간다. 그 결과 origin 측 페이지(0)와 target 측 페이지(1)가 달라져
+    // 위치 정렬에 실패한다. insertPicture 자체는 width=1, height=1 HWPUNIT 으로 둬서 페이지 흐름에
+    // 영향이 없도록 하고, 실제 크기는 곧이어 setPictureProperties 로 부여한다.
     const result = this.wasm.insertPicture(
       0,
       1,
@@ -132,23 +134,35 @@ export class SignatureStampManager {
     if (!result.ok) throw new Error('도장/서명 이미지를 문서에 삽입하지 못했습니다.');
 
     const ref = { sec: 0, paraIdx: result.paraIdx, controlIdx: result.controlIdx };
-    this.setPlaceholderProperties(ref);
+    // 페이지 좌상단에 BehindText 로 배치하고 실제 크기를 부여한다. crop 값은 명시적으로 0 으로 둬서
+    // insertPicture 직후 자동 부여된 cropRight/cropBottom (≈ natural 크기) 이 남는 것을 막는다.
+    this.setStampProperties(ref, size, 0, 0);
     this.wasm.refreshLayout();
     return ref;
   }
 
-  private setPlaceholderProperties(ref: StampRef): void {
-    this.wasm.setPictureProperties(ref.sec, ref.paraIdx, ref.controlIdx, {
-      width: 1,
-      height: 1,
+  private setStampProperties(
+    ref: StampRef,
+    size: { width: number; height: number },
+    horzOffsetPx: number,
+    vertOffsetPx: number,
+  ): { ok: boolean } {
+    return this.wasm.setPictureProperties(ref.sec, ref.paraIdx, ref.controlIdx, {
+      width: pagePxToHwpUnit(size.width),
+      height: pagePxToHwpUnit(size.height),
       treatAsChar: false,
       textWrap: 'BehindText',
       horzRelTo: 'Page',
       vertRelTo: 'Page',
       horzAlign: 'Left',
       vertAlign: 'Top',
-      horzOffset: 0,
-      vertOffset: 0,
+      horzOffset: pagePxToHwpUnit(horzOffsetPx),
+      vertOffset: pagePxToHwpUnit(vertOffsetPx),
+      // insertPicture 직후 자동 부여된 crop 값이 남아 한컴 오피스에서 그림이 잘려 보이는 것을 막는다.
+      cropLeft: 0,
+      cropTop: 0,
+      cropRight: 0,
+      cropBottom: 0,
       description: 'signature-stamp',
     });
   }
@@ -222,12 +236,21 @@ function fitStampSize(widthPx: number, heightPx: number): { width: number; heigh
 }
 
 function findSignatureTarget(wasm: WasmBridge): PageRect | null {
+  // 폼 값을 채우면 누름틀의 name/guide 가 비워지는 경우가 있어 이름으로만 후보를 좁히면
+  // 두 번째 호출(미리보기 반영 후 realign) 에서 (인) 위치를 찾지 못한다. name/guide 가 살아있는
+  // 동안엔 그쪽을 우선 검사하고, 그래도 못 찾으면 전체 누름틀을 훑어 (인) 가 있는 셀을 찾는다.
   const entries = wasm.getFieldList() as FieldListEntry[];
-  const candidates = entries
+  const named = entries
     .filter((entry) => TARGET_FIELD_NAMES.includes(entry.name) || TARGET_FIELD_NAMES.includes(entry.guide))
     .sort((a, b) => scoreTargetField(b) - scoreTargetField(a));
 
-  for (const entry of candidates) {
+  for (const entry of named) {
+    const rect = findTargetMarkNearField(wasm, entry);
+    if (rect) return rect;
+  }
+
+  for (const entry of entries) {
+    if (named.includes(entry)) continue;
     const rect = findTargetMarkNearField(wasm, entry);
     if (rect) return rect;
   }

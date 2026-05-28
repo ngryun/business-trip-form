@@ -6,6 +6,7 @@ import { registerFontFaces, preloadFonts } from './fonts';
 import { attachInlineEditing } from './field-interaction';
 import { setupDateTimePicker, type DateTimePickerController } from './datetime-picker';
 import { SignatureStampManager } from './signature-stamp';
+import { printPdf } from './print-pdf';
 import {
   FIELD_CONFIGS,
   formatDateKR,
@@ -544,8 +545,19 @@ async function initialize(): Promise<void> {
     }
   });
 
-  document.getElementById('btn-print')!.addEventListener('click', () => {
-    window.print();
+  document.getElementById('btn-print')!.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-print') as HTMLButtonElement;
+    btn.disabled = true;
+    try {
+      setStatus('인쇄용 페이지를 준비 중...');
+      await printPdf(wasm);
+      setStatus('인쇄 다이얼로그를 열었습니다. 모바일은 공유 시트에서 PDF 로 저장할 수 있습니다.');
+    } catch (err) {
+      console.error(err);
+      setStatus(`인쇄 준비 실패: ${describeError(err)}`, true);
+    } finally {
+      btn.disabled = false;
+    }
   });
 
   document.getElementById('btn-reset')!.addEventListener('click', () => {
