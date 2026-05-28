@@ -2,7 +2,7 @@
  * 미리보기 위에서 누름틀을 클릭했을 때 떠오르는 입력 팝오버.
  *
  * - 라벨에 맞는 위젯(text/date/select/textarea/일시 선택기) 렌더링
- * - Enter 확정 / Esc 취소 / 외부 클릭 취소 / 자동 포커스
+ * - Enter 다음/확정 / Esc 취소 / 외부 클릭 취소 / 자동 포커스
  * - 화면 가장자리에서 잘리지 않도록 위치 보정
  */
 
@@ -111,9 +111,10 @@ export function showFieldPopover(args: PopoverArgs): void {
     if (ke.key === 'Enter' && target?.closest('.field-popover__today-button')) {
       return;
     }
-    if (ke.key === 'Enter' && !(input instanceof HTMLTextAreaElement)) {
+    if (ke.key === 'Enter') {
+      if (target instanceof HTMLTextAreaElement && ke.shiftKey) return;
       ke.preventDefault();
-      finish('confirm');
+      finish(args.onNext ? 'next' : 'confirm');
     } else if (args.onNext && isNextShortcut(ke)) {
       ke.preventDefault();
       finish('next');
@@ -202,7 +203,11 @@ export function showDateTimeRangePopover(args: DateTimeRangePopoverArgs): void {
   cancelBtn.addEventListener('click', () => finish('cancel'));
   root.addEventListener('keydown', (e) => {
     const ke = e as KeyboardEvent;
-    if (args.onNext && isNextShortcut(ke)) {
+    const target = ke.target as HTMLElement | null;
+    if (ke.key === 'Enter' && !target?.closest('button')) {
+      ke.preventDefault();
+      finish(args.onNext ? 'next' : 'confirm');
+    } else if (args.onNext && isNextShortcut(ke)) {
       ke.preventDefault();
       finish('next');
     } else if (ke.key === 'Escape') {

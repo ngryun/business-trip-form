@@ -53,8 +53,13 @@ const TRAVEL_DATE_DEFAULTS: Record<string, string> = {
   시작일시: '갈때일자',
   종료일시: '올때일자',
 };
+const RETURN_LOCATION_DEFAULTS: Record<string, string> = {
+  갈때출발지: '올때도착지',
+  갈때도착지: '올때출발지',
+};
 const dateTimeControllers = new WeakMap<HTMLElement, DateTimePickerController>();
 const autoTravelDates = new Map<string, string>();
+const autoReturnLocations = new Map<string, string>();
 let liveDateTimePreviewHandler: (() => void) | null = null;
 
 interface PreviewApplyOptions {
@@ -62,6 +67,7 @@ interface PreviewApplyOptions {
 }
 
 interface SavedFormState {
+  autoReturnLocations?: Record<string, string>;
   autoTravelDates?: Record<string, string>;
   updatedAt?: string;
   values?: Record<string, string>;
@@ -248,12 +254,17 @@ function restoreFormState(): boolean {
   for (const [name, value] of Object.entries(saved.autoTravelDates ?? {})) {
     autoTravelDates.set(name, value);
   }
+  autoReturnLocations.clear();
+  for (const [name, value] of Object.entries(saved.autoReturnLocations ?? {})) {
+    autoReturnLocations.set(name, value);
+  }
   return true;
 }
 
 function saveFormState(): void {
   try {
     localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify({
+      autoReturnLocations: Object.fromEntries(autoReturnLocations),
       autoTravelDates: Object.fromEntries(autoTravelDates),
       updatedAt: new Date().toISOString(),
       values: collectRawFormValues(),
@@ -413,6 +424,19 @@ function setupDateTimeControls(): void {
   }
 }
 
+function setupReturnLocationDefaults(): void {
+  for (const sourceName of Object.keys(RETURN_LOCATION_DEFAULTS)) {
+    const source = formEl.elements.namedItem(sourceName);
+    if (!(source instanceof HTMLInputElement)) continue;
+    const apply = (): void => {
+      applyReturnLocationDefault(sourceName);
+    };
+    source.addEventListener('input', apply);
+    source.addEventListener('change', apply);
+    apply();
+  }
+}
+
 function syncAllDateTimeControlsToHidden(): void {
   for (const control of formEl.querySelectorAll<HTMLElement>('[data-datetime-picker]')) {
     dateTimeControllers.get(control)?.syncHidden();
@@ -457,6 +481,36 @@ function applyTravelDateDefault(control: HTMLElement): void {
   autoTravelDates.set(targetName, date);
 }
 
+function applyReturnLocationDefault(sourceName: string): boolean {
+  const targetName = RETURN_LOCATION_DEFAULTS[sourceName];
+  if (!targetName) return false;
+
+  const source = formEl.elements.namedItem(sourceName) as HTMLInputElement | null;
+  const target = formEl.elements.namedItem(targetName) as HTMLInputElement | null;
+  if (!source || !target) return false;
+
+  const nextValue = source.value;
+  const previousAutoValue = autoReturnLocations.get(targetName);
+  if (!nextValue) {
+    autoReturnLocations.delete(targetName);
+    if (previousAutoValue !== undefined && target.value === previousAutoValue) {
+      target.value = '';
+      return true;
+    }
+    return false;
+  }
+
+  if (target.value && target.value !== previousAutoValue) {
+    if (target.value === nextValue) autoReturnLocations.set(targetName, nextValue);
+    return false;
+  }
+  if (target.value === nextValue && previousAutoValue === nextValue) return false;
+
+  target.value = nextValue;
+  autoReturnLocations.set(targetName, nextValue);
+  return true;
+}
+
 async function initialize(): Promise<void> {
   setStatus('양식 엔진 초기화 중...');
   registerFontFaces();
@@ -464,6 +518,7 @@ async function initialize(): Promise<void> {
   const restoredFormState = restoreFormState();
   setDefaultSubmitDate();
   setupDateTimeControls();
+  setupReturnLocationDefaults();
   setupLocalFormPersistence();
   setupApplicantInfoStorage();
   await preloadFonts();
@@ -513,6 +568,11 @@ async function initialize(): Promise<void> {
   function applyTravelDatesToPreview(): void {
     const { 갈때일자, 올때일자 } = collectFormValues();
     setFieldValues(wasm, fields, { 갈때일자, 올때일자 });
+  }
+
+  function applyReturnLocationsToPreview(): void {
+    const { 올때출발지, 올때도착지 } = collectFormValues();
+    setFieldValues(wasm, fields, { 올때출발지, 올때도착지 }, { clearEmpty: true });
   }
 
   if (restoredFormState) {
@@ -573,6 +633,9 @@ async function initialize(): Promise<void> {
       syncFormFromInline(label, value);
       if (label === '시작일시' || label === '종료일시') {
         applyTravelDatesToPreview();
+      }
+      if (applyReturnLocationDefault(label)) {
+        applyReturnLocationsToPreview();
       }
       if (label === '성명' || label === '이름') {
         realignSignatureStamp();
@@ -692,6 +755,7 @@ async function initialize(): Promise<void> {
     const removedStamp = signatureStamp.clear();
     formEl.reset();
     autoTravelDates.clear();
+    autoReturnLocations.clear();
     clearSavedFormState();
     syncAllDateTimeControlsFromHidden();
     setDefaultSubmitDate();
