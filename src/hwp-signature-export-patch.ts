@@ -7,6 +7,7 @@ const HWPTAG_CTRL_HEADER = 71;
 const CTRL_ID_GSO = 0x67736f20; // " osg"
 const SIGNATURE_STAMP_DESCRIPTION = 'signature-stamp';
 const TEXT_WRAP_BITS_MASK = 0b111 << 21;
+// 본문과의 배치(bit 21~23). 한컴오피스에서 값별 hwp 를 직접 열어 확인한 결과 2 = 글 뒤로.
 const TEXT_WRAP_BEHIND_TEXT = 2 << 21;
 
 interface CfbEntry {
