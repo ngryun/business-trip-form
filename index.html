@@ -35,6 +35,10 @@
             <datalist id="applicant-position-options"></datalist>
             <datalist id="applicant-name-options"></datalist>
             <label class="signature-control">도장/서명 이미지
+              <span id="signature-current" class="signature-current" hidden>
+                <img id="signature-current-thumb" class="signature-current__thumb" alt="현재 도장 미리보기" />
+                <span id="signature-current-label" class="signature-current__label">사용 중</span>
+              </span>
               <span class="signature-control__row">
                 <input id="signature-image" type="file" accept="image/png,image/jpeg,image/gif,image/bmp" />
                 <button type="button" id="btn-clear-signature" class="signature-control__button" disabled>문서 삭제</button>

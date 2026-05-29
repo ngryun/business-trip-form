@@ -140,6 +140,35 @@ html, body {
   align-items: center;
   margin-top: 4px;
 }
+.signature-current {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 4px 8px 4px 4px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: #f9fafb;
+  max-width: 100%;
+}
+.signature-current[hidden] {
+  display: none;
+}
+.signature-current__thumb {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  background: #ffffff;
+  border-radius: 3px;
+  flex: 0 0 28px;
+}
+.signature-current__label {
+  font-size: 12px;
+  color: #374151;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .signature-control input[type="file"] {
   min-width: 0;
   font-size: 12px;

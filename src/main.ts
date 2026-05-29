@@ -57,6 +57,9 @@ const signatureInput = document.getElementById('signature-image') as HTMLInputEl
 const signatureClearBtn = document.getElementById('btn-clear-signature') as HTMLButtonElement | null;
 const signatureSaveBtn = document.getElementById('btn-save-signature') as HTMLButtonElement | null;
 const signatureClearSavedBtn = document.getElementById('btn-clear-saved-signature') as HTMLButtonElement | null;
+const signatureCurrentRoot = document.getElementById('signature-current') as HTMLElement | null;
+const signatureCurrentThumb = document.getElementById('signature-current-thumb') as HTMLImageElement | null;
+const signatureCurrentLabel = document.getElementById('signature-current-label') as HTMLElement | null;
 const TRAVEL_DATE_DEFAULTS: Record<string, string> = {
   시작일시: '갈때일자',
   종료일시: '올때일자',
@@ -791,6 +794,29 @@ async function initialize(): Promise<void> {
     if (signatureClearBtn) signatureClearBtn.disabled = !signatureStamp.hasStamp();
     if (signatureSaveBtn) signatureSaveBtn.disabled = !signatureStamp.getStoredStamp();
     if (signatureClearSavedBtn) signatureClearSavedBtn.disabled = !hasStoredSignatureStamp();
+    updateSignatureCurrentBadge();
+  }
+
+  /**
+   * 파일 input 은 "방금 고른 파일" 만 가리키므로 브라우저 저장본을 자동 복원한 뒤에도
+   * "선택된 파일 없음" 으로 보여 혼동을 준다. 현재 문서에 들어가 있는 도장의 작은 썸네일과
+   * 출처 라벨(브라우저 저장본 / 방금 업로드) 을 함께 보여줘서 상태를 명확히 한다.
+   */
+  function updateSignatureCurrentBadge(): void {
+    if (!signatureCurrentRoot || !signatureCurrentThumb || !signatureCurrentLabel) return;
+    const stamp = signatureStamp.getStoredStamp();
+    if (!stamp) {
+      signatureCurrentRoot.hidden = true;
+      signatureCurrentThumb.removeAttribute('src');
+      signatureCurrentLabel.textContent = '';
+      return;
+    }
+    signatureCurrentRoot.hidden = false;
+    signatureCurrentThumb.src = stamp.dataUrl;
+    const savedInBrowser = hasStoredSignatureStamp();
+    signatureCurrentLabel.textContent = savedInBrowser
+      ? '브라우저 저장본 사용 중 — 새 이미지를 고르면 교체됩니다'
+      : '방금 업로드한 이미지 사용 중 — 다음 방문에도 쓰려면 "브라우저 저장"';
   }
 
   document.getElementById('btn-apply')!.addEventListener('click', () => {
