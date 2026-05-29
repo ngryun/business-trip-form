@@ -830,10 +830,11 @@ async function initialize(): Promise<void> {
     }
   });
 
-  document.getElementById('btn-download-hwp')!.addEventListener('click', () => {
+  document.getElementById('btn-download-hwp')!.addEventListener('click', async () => {
     try {
       const fileName = suggestFileName(collectFormValues());
-      downloadHwp(wasm, fileName);
+      setStatus('HWP 다운로드 준비 중...');
+      await downloadHwp(wasm, fileName);
       setStatus(`다운로드: ${fileName}`);
     } catch (err) {
       console.error(err);
