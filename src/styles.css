@@ -398,26 +398,89 @@ html, body {
   color: #ffffff;
 }
 .datetime-time {
-  display: grid;
-  grid-template-rows: auto auto;
-  gap: 10px;
   min-width: 0;
 }
 .datetime-time__title {
-  margin-bottom: 5px;
+  margin-bottom: 6px;
   font-size: 12px;
   font-weight: 700;
   color: #374151;
 }
-.datetime-time__buttons {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 4px;
+
+/* iOS 스타일 스크롤 휠 시간 선택 */
+.datetime-wheel {
+  --wheel-item-h: 32px;
+  --wheel-rows: 5;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 2px 0;
+  user-select: none;
 }
-.datetime-time__button {
-  height: 28px;
-  border-radius: 4px;
-  font-size: 12px;
+.datetime-wheel__colon {
+  font-size: 18px;
+  font-weight: 700;
+  color: #374151;
+}
+.datetime-wheel__list {
+  box-sizing: border-box;
+  height: calc(var(--wheel-item-h) * var(--wheel-rows));
+  width: 64px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-snap-type: y mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  /* 위/아래 끝을 살짝 흐리게 해 휠 느낌을 준다 */
+  -webkit-mask-image: linear-gradient(180deg, transparent, #000 24%, #000 76%, transparent);
+  mask-image: linear-gradient(180deg, transparent, #000 24%, #000 76%, transparent);
+}
+/* 첫/마지막 항목도 가운데(선택 띠)까지 올 수 있도록 위아래 여백을 스크롤 내용으로 넣는다 */
+.datetime-wheel__list::before,
+.datetime-wheel__list::after {
+  content: "";
+  display: block;
+  height: calc(var(--wheel-item-h) * (var(--wheel-rows) - 1) / 2);
+}
+.datetime-wheel__list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+.datetime-wheel__item {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: var(--wheel-item-h);
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  font-size: 16px;
+  color: #9ca3af;
+  cursor: pointer;
+  scroll-snap-align: center;
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+.datetime-wheel__item.is-selected {
+  color: #111827;
+  font-weight: 700;
+  transform: scale(1.12);
+}
+.datetime-wheel__band {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(64px * 2 + 6px + 16px);
+  height: var(--wheel-item-h);
+  transform: translate(-50%, -50%);
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.25);
+  pointer-events: none;
 }
 
 .actions {
@@ -780,18 +843,14 @@ html, body {
     height: 23px;
     aspect-ratio: auto;
   }
-  .datetime-time {
-    gap: 7px;
-  }
   .datetime-time__title {
     margin-bottom: 4px;
   }
-  .datetime-time__buttons {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: 3px;
+  .datetime-wheel {
+    --wheel-item-h: 34px;
+    --wheel-rows: 5;
   }
-  .datetime-time__button {
-    height: 24px;
-    font-size: 11px;
+  .datetime-wheel__item {
+    font-size: 17px;
   }
 }
