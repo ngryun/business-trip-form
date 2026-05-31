@@ -94,16 +94,12 @@ export function setupDateTimePicker(root: HTMLElement, options: DateTimePickerOp
       render();
       emit();
     });
-    renderTimeWheel(panel, state, { hour: defaultHour, minute: defaultMinute }, (part, value) => {
-      if (part === 'hour') {
-        if (state.hour === value) return;
-        state.hour = value;
-      } else {
-        if (state.minute === value) return;
-        state.minute = value;
-      }
+    renderTimeButtons(panel, state, (part, value) => {
+      if (part === 'hour') state.hour = value;
+      else state.minute = value;
       render();
       emit();
+      if (!options.inline && part === 'minute' && state.date && state.hour && state.minute) close();
     });
   }
 
@@ -247,117 +243,39 @@ function renderCalendar(panel: HTMLElement, state: PickerState, onSelect: (date:
   calendar.appendChild(grid);
 }
 
-const WHEEL_SCROLL_DEBOUNCE_MS = 110;
-
-/**
- * 시/분을 iOS 스타일 스크롤 휠로 그린다. 버튼을 매 render 마다 다시 만들면 스크롤 위치가
- * 초기화되므로, 휠 DOM 은 최초 1회만 만들고 이후에는 선택값에 맞춰 스크롤 위치만 동기화한다.
- */
-function renderTimeWheel(
-  panel: HTMLElement,
-  state: PickerState,
-  defaults: { hour: string; minute: string },
-  onSelect: (part: 'hour' | 'minute', value: string) => void,
-): void {
+function renderTimeButtons(panel: HTMLElement, state: PickerState, onSelect: (part: 'hour' | 'minute', value: string) => void): void {
   let time = panel.querySelector<HTMLElement>('[data-datetime-time]');
   if (!time) {
     time = document.createElement('div');
     time.className = 'datetime-time';
     time.dataset.datetimeTime = '';
-
-    const title = document.createElement('div');
-    title.className = 'datetime-time__title';
-    title.textContent = '시간';
-
-    const wheel = document.createElement('div');
-    wheel.className = 'datetime-wheel';
-
-    const colon = document.createElement('span');
-    colon.className = 'datetime-wheel__colon';
-    colon.textContent = ':';
-    colon.setAttribute('aria-hidden', 'true');
-
-    const band = document.createElement('div');
-    band.className = 'datetime-wheel__band';
-    band.setAttribute('aria-hidden', 'true');
-
-    wheel.append(
-      buildWheelColumn('hour', '시', DATETIME_HOUR_OPTIONS),
-      colon,
-      buildWheelColumn('minute', '분', DATETIME_MINUTE_OPTIONS),
-      band,
-    );
-    time.append(title, wheel);
     panel.appendChild(time);
   }
-
-  syncWheel(time.querySelector<HTMLElement>('[data-wheel="hour"]'), state.hour || defaults.hour, (value) =>
-    onSelect('hour', value),
-  );
-  syncWheel(time.querySelector<HTMLElement>('[data-wheel="minute"]'), state.minute || defaults.minute, (value) =>
-    onSelect('minute', value),
+  time.replaceChildren(
+    buttonGroup('시간', DATETIME_HOUR_OPTIONS, state.hour, (value) => onSelect('hour', value)),
+    buttonGroup('분', DATETIME_MINUTE_OPTIONS, state.minute, (value) => onSelect('minute', value)),
   );
 }
 
-interface WheelList extends HTMLElement {
-  __onPick?: (value: string) => void;
-  __suppressScroll?: boolean;
-}
-
-function buildWheelColumn(part: 'hour' | 'minute', unitLabel: string, values: string[]): HTMLElement {
-  const list = document.createElement('div') as WheelList;
-  list.className = 'datetime-wheel__list';
-  list.dataset.wheel = part;
-  list.setAttribute('role', 'listbox');
-  list.setAttribute('aria-label', `${unitLabel} 선택`);
-
+function buttonGroup(title: string, values: string[], selected: string, onClick: (value: string) => void): HTMLElement {
+  const group = document.createElement('section');
+  group.className = 'datetime-time__group';
+  const heading = document.createElement('div');
+  heading.className = 'datetime-time__title';
+  heading.textContent = title;
+  const buttons = document.createElement('div');
+  buttons.className = 'datetime-time__buttons';
   for (const value of values) {
-    const item = document.createElement('button');
-    item.type = 'button';
-    item.className = 'datetime-wheel__item';
-    item.dataset.value = value;
-    item.textContent = value;
-    item.setAttribute('role', 'option');
-    list.appendChild(item);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = value;
+    btn.className = 'datetime-time__button';
+    btn.classList.toggle('is-selected', value === selected);
+    btn.addEventListener('click', () => onClick(value));
+    buttons.appendChild(btn);
   }
-
-  let debounce: number | undefined;
-  list.addEventListener('scroll', () => {
-    if (list.__suppressScroll) return;
-    window.clearTimeout(debounce);
-    debounce = window.setTimeout(() => {
-      const itemHeight = list.firstElementChild ? (list.firstElementChild as HTMLElement).offsetHeight : 0;
-      if (!itemHeight) return;
-      const index = Math.max(0, Math.min(values.length - 1, Math.round(list.scrollTop / itemHeight)));
-      list.__onPick?.(values[index]);
-    }, WHEEL_SCROLL_DEBOUNCE_MS);
-  });
-  list.addEventListener('click', (e) => {
-    const item = (e.target as HTMLElement).closest<HTMLElement>('[data-value]');
-    if (item?.dataset.value) list.__onPick?.(item.dataset.value);
-  });
-
-  return list;
-}
-
-function syncWheel(list: WheelList | null, value: string, onPick: (value: string) => void): void {
-  if (!list) return;
-  list.__onPick = onPick;
-  const items = Array.from(list.children) as HTMLElement[];
-  const index = Math.max(0, items.findIndex((item) => item.dataset.value === value));
-  items.forEach((item, i) => item.classList.toggle('is-selected', i === index));
-
-  const itemHeight = items[0]?.offsetHeight ?? 0;
-  if (!itemHeight) return; // 패널이 아직 숨겨져 layout 이 없으면 (offsetHeight 0) 열릴 때 다시 동기화된다.
-  const target = index * itemHeight;
-  if (Math.abs(list.scrollTop - target) > 1) {
-    // 프로그램적 스크롤이 scroll 이벤트를 다시 발생시켜 onPick 이 도는 것을 막는다.
-    list.__suppressScroll = true;
-    list.scrollTop = target;
-    window.setTimeout(() => {
-      list.__suppressScroll = false;
-    }, 80);
-  }
+  group.append(heading, buttons);
+  return group;
 }
 
 function iconButton(label: string, ariaLabel: string, action: string): HTMLButtonElement {
