@@ -126,6 +126,28 @@ export class SignatureStampManager {
     return true;
   }
 
+  /**
+   * 미리보기 새로고침이 문서를 export→reload 하면 도장의 본문배치(글 뒤로)가 rhwp exporter
+   * 버그로 '어울림' 으로 풀린다. 위치(offset)는 reload 후에도 보존되므로, 위치는 그대로 두고
+   * 본문배치/크기만 현재 offset 에 다시 적용한다. (realign 처럼 위치를 재계산하지 않는다 —
+   * reload 직후엔 그림이 '어울림' 으로 배치돼 렌더 좌표가 달라 보정값이 틀어지기 때문.)
+   */
+  reapplyPlacement(): boolean {
+    if (!this.ref || !this.size) return false;
+    try {
+      const props = this.wasm.getPictureProperties(this.ref.sec, this.ref.paraIdx, this.ref.controlIdx);
+      const result = this.setStampProperties(
+        this.ref,
+        this.size,
+        props.horzOffset / HWPUNIT_PER_PAGE_PX,
+        props.vertOffset / HWPUNIT_PER_PAGE_PX,
+      );
+      return result.ok;
+    } catch {
+      return false;
+    }
+  }
+
   clear(): boolean {
     if (!this.ref) return false;
     const { sec, paraIdx, controlIdx } = this.ref;

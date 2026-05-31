@@ -1,7 +1,7 @@
 import { loadTemplate } from './template-loader';
 import { discoverFields, fillDateTimeRange, removeDateTimeRangeSeparator, setFieldValues, type FieldMap } from './field-filler';
 import { downloadHwp } from './download';
-import { mountPreview, refreshPreview } from './preview';
+import { mountPreview, refreshPreview, setPreviewReloadHook } from './preview';
 import { registerFontFaces, preloadFonts } from './fonts';
 import { attachInlineEditing } from './field-interaction';
 import { setupDateTimePicker, type DateTimePickerController } from './datetime-picker';
@@ -622,6 +622,11 @@ async function initialize(): Promise<void> {
   const canvasView = mountPreview(previewContainer, wasm);
   const signatureStamp = new SignatureStampManager(wasm);
   updateSignatureButtons();
+  // refreshPreview 가 문서를 export→reload 하면 도장 배치(글 뒤로)가 풀리므로, 위치는 그대로
+  // 두고 본문배치만 다시 적용한다. (realign 은 reload 직후 좌표가 틀어져 위치가 어긋난다.)
+  setPreviewReloadHook(() => {
+    if (signatureStamp.hasStamp()) signatureStamp.reapplyPlacement();
+  });
   function applyCollectedValuesToPreview(
     statusMessage?: string,
     options: PreviewApplyOptions = {},
