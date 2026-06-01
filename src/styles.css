@@ -398,26 +398,42 @@ html, body {
   color: #ffffff;
 }
 .datetime-time {
-  display: grid;
-  grid-template-rows: auto auto;
-  gap: 10px;
   min-width: 0;
 }
 .datetime-time__title {
-  margin-bottom: 5px;
+  margin-bottom: 6px;
   font-size: 12px;
   font-weight: 700;
   color: #374151;
 }
-.datetime-time__buttons {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 4px;
+/* 시/분 네이티브 드롭다운 (모바일에서 OS 휠 피커로 표시) */
+.datetime-time__selects {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
-.datetime-time__button {
-  height: 28px;
-  border-radius: 4px;
-  font-size: 12px;
+.datetime-time__colon {
+  font-size: 15px;
+  font-weight: 700;
+  color: #374151;
+}
+.datetime-time__select {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 36px;
+  padding: 0 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #111827;
+  font-family: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+.datetime-time__select:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
 }
 
 .actions {
