@@ -94,7 +94,7 @@ export function setupDateTimePicker(root: HTMLElement, options: DateTimePickerOp
       render();
       emit();
     });
-    renderTimeButtons(panel, state, (part, value) => {
+    renderTimeSelects(panel, state, (part, value) => {
       if (part === 'hour') state.hour = value;
       else state.minute = value;
       render();
@@ -243,39 +243,77 @@ function renderCalendar(panel: HTMLElement, state: PickerState, onSelect: (date:
   calendar.appendChild(grid);
 }
 
-function renderTimeButtons(panel: HTMLElement, state: PickerState, onSelect: (part: 'hour' | 'minute', value: string) => void): void {
+/**
+ * 시/분을 네이티브 <select> 로 그린다. 모바일에서는 탭하면 OS 기본 휠 피커가 떠서
+ * 터치/선택 커밋을 OS 가 처리하므로, 커스텀 스크롤 휠의 모바일 문제(페이지가 같이
+ * 스크롤됨 / 값 반영 안 됨)가 원천적으로 없다. 화면 공간도 작게 차지한다.
+ *
+ * <select> 는 스크롤 상태가 없어 매 render 마다 다시 만들어도 되지만, 열려 있는
+ * 네이티브 피커가 닫히는 것을 피하려고 1회만 만들고 이후엔 value 만 동기화한다.
+ */
+function renderTimeSelects(
+  panel: HTMLElement,
+  state: PickerState,
+  onSelect: (part: 'hour' | 'minute', value: string) => void,
+): void {
   let time = panel.querySelector<HTMLElement>('[data-datetime-time]');
   if (!time) {
     time = document.createElement('div');
     time.className = 'datetime-time';
     time.dataset.datetimeTime = '';
+
+    const title = document.createElement('div');
+    title.className = 'datetime-time__title';
+    title.textContent = '시간';
+
+    const row = document.createElement('div');
+    row.className = 'datetime-time__selects';
+
+    const colon = document.createElement('span');
+    colon.className = 'datetime-time__colon';
+    colon.textContent = ':';
+    colon.setAttribute('aria-hidden', 'true');
+
+    row.append(
+      buildTimeSelect('hour', '시', DATETIME_HOUR_OPTIONS, (value) => onSelect('hour', value)),
+      colon,
+      buildTimeSelect('minute', '분', DATETIME_MINUTE_OPTIONS, (value) => onSelect('minute', value)),
+    );
+    time.append(title, row);
     panel.appendChild(time);
   }
-  time.replaceChildren(
-    buttonGroup('시간', DATETIME_HOUR_OPTIONS, state.hour, (value) => onSelect('hour', value)),
-    buttonGroup('분', DATETIME_MINUTE_OPTIONS, state.minute, (value) => onSelect('minute', value)),
-  );
+
+  const hourSel = time.querySelector<HTMLSelectElement>('select[data-time="hour"]');
+  const minSel = time.querySelector<HTMLSelectElement>('select[data-time="minute"]');
+  if (hourSel) hourSel.value = state.hour || '';
+  if (minSel) minSel.value = state.minute || '';
 }
 
-function buttonGroup(title: string, values: string[], selected: string, onClick: (value: string) => void): HTMLElement {
-  const group = document.createElement('section');
-  group.className = 'datetime-time__group';
-  const heading = document.createElement('div');
-  heading.className = 'datetime-time__title';
-  heading.textContent = title;
-  const buttons = document.createElement('div');
-  buttons.className = 'datetime-time__buttons';
+function buildTimeSelect(
+  part: 'hour' | 'minute',
+  placeholder: string,
+  values: string[],
+  onChange: (value: string) => void,
+): HTMLSelectElement {
+  const select = document.createElement('select');
+  select.className = 'datetime-time__select';
+  select.dataset.time = part;
+  select.setAttribute('aria-label', `${placeholder} 선택`);
+
+  const ph = document.createElement('option');
+  ph.value = '';
+  ph.textContent = placeholder;
+  select.appendChild(ph);
+
   for (const value of values) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = value;
-    btn.className = 'datetime-time__button';
-    btn.classList.toggle('is-selected', value === selected);
-    btn.addEventListener('click', () => onClick(value));
-    buttons.appendChild(btn);
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    select.appendChild(option);
   }
-  group.append(heading, buttons);
-  return group;
+
+  select.addEventListener('change', () => onChange(select.value));
+  return select;
 }
 
 function iconButton(label: string, ariaLabel: string, action: string): HTMLButtonElement {
