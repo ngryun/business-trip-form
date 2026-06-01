@@ -215,11 +215,13 @@ function renderCalendar(panel: HTMLElement, state: PickerState, onSelect: (date:
 
   const weekRow = document.createElement('div');
   weekRow.className = 'datetime-calendar__weekdays';
-  for (const day of WEEKDAYS) {
+  WEEKDAYS.forEach((day, i) => {
     const el = document.createElement('span');
     el.textContent = day;
+    if (i === 0) el.classList.add('is-sun');
+    if (i === 6) el.classList.add('is-sat');
     weekRow.appendChild(el);
-  }
+  });
   calendar.appendChild(weekRow);
 
   const grid = document.createElement('div');
@@ -230,6 +232,7 @@ function renderCalendar(panel: HTMLElement, state: PickerState, onSelect: (date:
       continue;
     }
     const dateValue = toDateValue(state.viewYear, state.viewMonth, day);
+    const weekday = new Date(state.viewYear, state.viewMonth, day).getDay();
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'datetime-calendar__day';
@@ -237,10 +240,27 @@ function renderCalendar(panel: HTMLElement, state: PickerState, onSelect: (date:
     btn.setAttribute('aria-label', dateValue);
     btn.classList.toggle('is-selected', state.date === dateValue);
     btn.classList.toggle('is-today', dateValue === todayValue());
+    if (weekday === 0) btn.classList.add('is-sun');
+    if (weekday === 6) btn.classList.add('is-sat');
     btn.addEventListener('click', () => onSelect(dateValue));
     grid.appendChild(btn);
   }
   calendar.appendChild(grid);
+
+  const footer = document.createElement('div');
+  footer.className = 'datetime-calendar__footer';
+  const todayBtn = document.createElement('button');
+  todayBtn.type = 'button';
+  todayBtn.className = 'datetime-calendar__today-btn';
+  todayBtn.textContent = '오늘';
+  todayBtn.addEventListener('click', () => {
+    const now = new Date();
+    state.viewYear = now.getFullYear();
+    state.viewMonth = now.getMonth();
+    onSelect(todayValue());
+  });
+  footer.appendChild(todayBtn);
+  calendar.appendChild(footer);
 }
 
 /**
