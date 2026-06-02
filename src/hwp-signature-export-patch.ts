@@ -1,3 +1,5 @@
+import { deflateRaw as pakoDeflateRaw, inflateRaw as pakoInflateRaw } from 'pako';
+
 const CFB_FREE_SECT = 0xffffffff;
 const CFB_END_OF_CHAIN = 0xfffffffe;
 const CFB_FAT_SECT = 0xfffffffd;
@@ -18,8 +20,6 @@ interface CfbEntry {
   dirOffset: number;
 }
 
-type CompressionStreamFormat = 'gzip' | 'deflate' | 'deflate-raw';
-type CompressionStreamConstructor = new (format: CompressionStreamFormat) => TransformStream<Uint8Array, Uint8Array>;
 
 /**
  * @rhwp/core 0.7.11 updates the in-memory picture layout correctly, so preview renders the stamp
@@ -339,22 +339,18 @@ class CompoundFile {
   }
 }
 
+// HWP Section 스트림은 raw DEFLATE(zlib 헤더 없음)로 압축돼 있다. 예전엔 브라우저
+// CompressionStream/DecompressionStream('deflate-raw') 를 썼지만, Safari 는 'deflate-raw'
+// 포맷을 제대로 지원하지 않아 패치가 예외로 떨어지고 도장 배치 보정이 적용되지 않았다.
+// pako(zlib 포팅)의 순수 JS raw DEFLATE 를 써서 모든 브라우저에서 동일하게 동작한다.
+// (fflate 는 압축률이 zlib 보다 낮아 재압축 결과가 원본 CFB 할당을 초과하는 문제가 있었다.
+//  pako 는 zlib 품질이라 원본과 거의 같은 크기로 압축돼 기존 섹터 할당 안에 들어간다.)
 async function inflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
-  const Decompression = globalThis.DecompressionStream as unknown as CompressionStreamConstructor | undefined;
-  if (!Decompression) throw new Error('이 브라우저는 HWP 압축 해제 API를 지원하지 않습니다.');
-  const stream = new Blob([toArrayBuffer(bytes)]).stream().pipeThrough(new Decompression('deflate-raw'));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+  return pakoInflateRaw(bytes);
 }
 
 async function deflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
-  const Compression = globalThis.CompressionStream as unknown as CompressionStreamConstructor | undefined;
-  if (!Compression) throw new Error('이 브라우저는 HWP 압축 API를 지원하지 않습니다.');
-  const stream = new Blob([toArrayBuffer(bytes)]).stream().pipeThrough(new Compression('deflate-raw'));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
-}
-
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  return pakoDeflateRaw(bytes, { level: 9 });
 }
 
 function isRealSector(sector: number): boolean {
