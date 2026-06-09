@@ -97,6 +97,12 @@ export function setupDateTimePicker(root: HTMLElement, options: DateTimePickerOp
     renderTimeSelects(panel, state, (part, value) => {
       if (part === 'hour') state.hour = value;
       else state.minute = value;
+      // 시·분 중 한쪽만 고르면 값이 커밋되지 않으므로(date+hour+minute 모두 필요),
+      // 비어 있는 반대쪽은 기본값(분 00 / 시 defaultHour)으로 채워 선택 즉시 반영한다.
+      if (value) {
+        if (!state.minute) state.minute = defaultMinute;
+        if (!state.hour) state.hour = defaultHour;
+      }
       render();
       emit();
       if (!options.inline && part === 'minute' && state.date && state.hour && state.minute) close();
