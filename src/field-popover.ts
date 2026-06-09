@@ -8,11 +8,13 @@
 
 import {
   createDateTimePicker,
+  getDateTimePickerController,
   getDateTimePickerValue,
 } from './datetime-picker';
 import {
   FIELD_CONFIGS,
   formatDateKR,
+  formatDateTimeCompactKR,
   type WidgetConfig,
 } from './field-config';
 
@@ -31,11 +33,21 @@ export interface PopoverArgs {
 export interface DateTimeRangePopoverArgs {
   anchor: { x: number; y: number };
   endValue: string;
+  /** 처음 활성화할 탭 — 누름틀의 종료 쪽을 클릭했으면 'end' 로 열어준다. */
+  initialTab?: 'start' | 'end';
   onCancel: () => void;
   onConfirm: (startValue: string, endValue: string) => void;
   onNext?: (startValue: string, endValue: string) => void;
   startValue: string;
 }
+
+/** 학교 출장에서 흔한 시간 패턴 — 시작 탭에서 고른 날짜(없으면 오늘)에 한 번에 적용한다. */
+const RANGE_PRESETS: Array<{ label: string; startTime: string; endTime: string; nextDay?: boolean }> = [
+  { label: '하루 09–18', startTime: '09:00', endTime: '18:00' },
+  { label: '오전 09–13', startTime: '09:00', endTime: '13:00' },
+  { label: '오후 13–18', startTime: '13:00', endTime: '18:00' },
+  { label: '1박 2일', startTime: '09:00', endTime: '18:00', nextDay: true },
+];
 
 let currentPopover: HTMLElement | null = null;
 let currentCleanup: (() => void) | null = null;
@@ -164,12 +176,100 @@ export function showDateTimeRangePopover(args: DateTimeRangePopoverArgs): void {
   titleEl.textContent = '출장 일시';
   root.appendChild(titleEl);
 
+  // 시작/종료 탭 — 탭 라벨이 현재 값 요약을 겸한다
+  let activeTab: 'start' | 'end' = args.initialTab ?? 'start';
+  const tabs = document.createElement('div');
+  tabs.className = 'field-popover__tabs';
+  tabs.setAttribute('role', 'tablist');
+  const startTabBtn = createRangeTabButton();
+  const endTabBtn = createRangeTabButton();
+  tabs.append(startTabBtn, endTabBtn);
+  root.appendChild(tabs);
+
+  // 빠른 선택 칩
+  const presets = document.createElement('div');
+  presets.className = 'field-popover__presets';
+  const presetsLabel = document.createElement('span');
+  presetsLabel.className = 'field-popover__recent-label';
+  presetsLabel.textContent = '빠른 선택';
+  presets.appendChild(presetsLabel);
+  root.appendChild(presets);
+
+  // 두 피커를 모두 만들어 두고 표시만 전환 — 탭을 오가도 입력 상태가 유지된다
   const range = document.createElement('div');
   range.className = 'field-popover__range';
-  const startPicker = createRangeDateTimeField('시작 일시', args.startValue, '09');
-  const endPicker = createRangeDateTimeField('종료 일시', args.endValue, '18');
-  range.append(startPicker.root, endPicker.root);
+  const startPicker = createDateTimePicker(args.startValue, {
+    defaultHour: '09',
+    inline: true,
+    onChange: handleStartChange,
+  });
+  const endPicker = createDateTimePicker(args.endValue, {
+    defaultHour: '18',
+    inline: true,
+    onChange: updateRangeMeta,
+  });
+  const startPane = createRangeTabPane(startPicker);
+  const endPane = createRangeTabPane(endPicker);
+  range.append(startPane, endPane);
   root.appendChild(range);
+
+  const warnEl = document.createElement('div');
+  warnEl.className = 'field-popover__range-warning';
+  warnEl.textContent = '⚠ 종료 일시가 시작보다 빠릅니다.';
+  warnEl.hidden = true;
+  root.appendChild(warnEl);
+
+  function rangeValues(): { start: string; end: string } {
+    return {
+      start: getDateTimePickerValue(startPicker),
+      end: getDateTimePickerValue(endPicker),
+    };
+  }
+
+  /** 시작을 고르면 비어 있는 종료를 같은 날 18:00 으로 제안한다 (탭에서 바로 수정 가능). */
+  function handleStartChange(value: string): void {
+    if (value && !getDateTimePickerValue(endPicker)) {
+      getDateTimePickerController(endPicker)?.setValue(`${value.slice(0, 10)}T18:00`);
+    }
+    updateRangeMeta();
+  }
+
+  function updateRangeMeta(): void {
+    const { start, end } = rangeValues();
+    startTabBtn.textContent = start ? `시작 · ${formatDateTimeCompactKR(start)}` : '시작 일시';
+    endTabBtn.textContent = end ? `종료 · ${formatDateTimeCompactKR(end)}` : '종료 일시';
+    startTabBtn.classList.toggle('is-active', activeTab === 'start');
+    endTabBtn.classList.toggle('is-active', activeTab === 'end');
+    startTabBtn.setAttribute('aria-selected', String(activeTab === 'start'));
+    endTabBtn.setAttribute('aria-selected', String(activeTab === 'end'));
+    startPane.hidden = activeTab !== 'start';
+    endPane.hidden = activeTab !== 'end';
+    warnEl.hidden = !(start && end && end < start);
+  }
+
+  function setActiveTab(tab: 'start' | 'end'): void {
+    activeTab = tab;
+    updateRangeMeta();
+  }
+
+  startTabBtn.addEventListener('click', () => setActiveTab('start'));
+  endTabBtn.addEventListener('click', () => setActiveTab('end'));
+
+  for (const preset of RANGE_PRESETS) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'field-popover__recent-chip';
+    chip.textContent = preset.label;
+    chip.addEventListener('click', () => {
+      // 시작 탭에서 고른 날짜 기준, 아직 없으면 오늘
+      const date = getDateTimePickerController(startPicker)?.getDate() || todayDateValue();
+      const endDate = preset.nextDay ? addDaysToDateValue(date, 1) : date;
+      getDateTimePickerController(startPicker)?.setValue(`${date}T${preset.startTime}`);
+      getDateTimePickerController(endPicker)?.setValue(`${endDate}T${preset.endTime}`);
+      updateRangeMeta();
+    });
+    presets.appendChild(chip);
+  }
 
   const buttons = document.createElement('div');
   buttons.className = 'field-popover__buttons';
@@ -189,6 +289,7 @@ export function showDateTimeRangePopover(args: DateTimeRangePopoverArgs): void {
   else buttons.append(cancelBtn, confirmBtn);
   root.appendChild(buttons);
 
+  updateRangeMeta();
   document.body.appendChild(root);
   positionNear(root, args.anchor);
 
@@ -199,8 +300,7 @@ export function showDateTimeRangePopover(args: DateTimeRangePopoverArgs): void {
       return;
     }
 
-    const startValue = getDateTimePickerValue(startPicker.picker);
-    const endValue = getDateTimePickerValue(endPicker.picker);
+    const { start: startValue, end: endValue } = rangeValues();
     if (action === 'next' && args.onNext) {
       closeFieldPopover();
       args.onNext(startValue, endValue);
@@ -234,7 +334,7 @@ export function showDateTimeRangePopover(args: DateTimeRangePopoverArgs): void {
   setTimeout(() => document.addEventListener('mousedown', onOuter, { capture: true }), 0);
   currentCleanup = () => document.removeEventListener('mousedown', onOuter, { capture: true } as any);
 
-  setTimeout(() => focusInput(startPicker.picker), 0);
+  setTimeout(() => focusInput(activeTab === 'end' ? endPicker : startPicker), 0);
   currentPopover = root;
 }
 
@@ -410,18 +510,30 @@ function createSubmitDateInput(initial: string): HTMLElement {
   return root;
 }
 
-function createRangeDateTimeField(label: string, initial: string, defaultHour: string): { root: HTMLElement; picker: HTMLElement } {
-  const root = document.createElement('section');
-  root.className = 'field-popover__range-field';
+function createRangeTabButton(): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'field-popover__tab';
+  btn.setAttribute('role', 'tab');
+  return btn;
+}
 
-  const heading = document.createElement('div');
-  heading.className = 'field-popover__range-label';
-  heading.textContent = label;
-
-  const picker = createDateTimePicker(initial, { defaultHour, inline: true });
+function createRangeTabPane(picker: HTMLElement): HTMLElement {
+  const pane = document.createElement('section');
+  pane.className = 'field-popover__range-field';
+  pane.setAttribute('role', 'tabpanel');
   picker.classList.add('field-popover__range-picker');
-  root.append(heading, picker);
-  return { root, picker };
+  pane.appendChild(picker);
+  return pane;
+}
+
+/** `YYYY-MM-DD` 에 일수를 더한다 (월/년 경계는 Date 가 처리). */
+function addDaysToDateValue(date: string, days: number): string {
+  const m = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return date;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + days);
+  const pad = (v: number): string => String(v).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 function getInputValue(el: HTMLElement): string {

@@ -31,6 +31,13 @@ interface PickerState {
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
+/** createDateTimePicker 로 만든 root 에서 controller 를 되찾기 위한 매핑 (범위 팝오버에서 사용) */
+const pickerControllers = new WeakMap<HTMLElement, DateTimePickerController>();
+
+export function getDateTimePickerController(root: HTMLElement): DateTimePickerController | null {
+  return pickerControllers.get(root) ?? null;
+}
+
 export function setupDateTimePicker(root: HTMLElement, options: DateTimePickerOptions = {}): DateTimePickerController | null {
   const hidden = root.querySelector<HTMLInputElement>('input[type="hidden"]');
   if (!hidden) return null;
@@ -142,12 +149,14 @@ export function setupDateTimePicker(root: HTMLElement, options: DateTimePickerOp
   close();
   if (options.inline) open();
 
-  return {
+  const controller: DateTimePickerController = {
     getDate: () => state.date,
     getValue: () => hiddenInput.value,
     setValue,
     syncHidden,
   };
+  pickerControllers.set(root, controller);
+  return controller;
 }
 
 export function createDateTimePicker(value: string, options: DateTimePickerOptions = {}): HTMLElement {

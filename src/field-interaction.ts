@@ -202,49 +202,15 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
         onAfterEdit('시작일시', newRange);
         return newRange;
       };
-      if (isDesktopRangeEditing()) {
-        showDateTimeRangePopover({
-          startValue: start,
-          endValue: end,
-          anchor,
-          onConfirm: (nextStart, nextEnd) => { commitRange(nextStart, nextEnd); },
-          onNext: (nextStart, nextEnd) => {
-            commitRange(nextStart, nextEnd);
-            openNextEmptyField(fieldId);
-          },
-          onCancel: () => undefined,
-        });
-        return;
-      }
-      showFieldPopover({
-        label,
-        initialValue: label === '종료일시' ? end : start,
+      // 시작/종료를 탭으로 오가는 하나의 팝오버 — 누름틀의 종료 쪽(오른쪽)을 클릭했으면 종료 탭으로 연다
+      showDateTimeRangePopover({
+        startValue: start,
+        endValue: end,
+        initialTab: label === '종료일시' ? 'end' : 'start',
         anchor,
-        onConfirm: (raw) => {
-          const newRange = label === '종료일시'
-            ? formatDateTimeRange(start, raw)
-            : formatDateTimeRange(raw, end);
-          if (!newRange) return; // 시작 미입력이면 취소처럼 동작
-          try {
-            fillDateTimeRange(wasm, getFields(), newRange);
-          } catch (err) {
-            console.error('[field-interaction] 적용 실패:', err);
-            return;
-          }
-          onAfterEdit(label, newRange);
-        },
-        onNext: (raw) => {
-          const newRange = label === '종료일시'
-            ? formatDateTimeRange(start, raw)
-            : formatDateTimeRange(raw, end);
-          if (newRange) {
-            try {
-              fillDateTimeRange(wasm, getFields(), newRange);
-              onAfterEdit(label, newRange);
-            } catch (err) {
-              console.error('[field-interaction] 적용 실패:', err);
-            }
-          }
+        onConfirm: (nextStart, nextEnd) => { commitRange(nextStart, nextEnd); },
+        onNext: (nextStart, nextEnd) => {
+          commitRange(nextStart, nextEnd);
           openNextEmptyField(fieldId);
         },
         onCancel: () => undefined,
@@ -738,10 +704,6 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
     highlightEl = null;
     closeFieldPopover();
   };
-}
-
-function isDesktopRangeEditing(): boolean {
-  return window.matchMedia('(min-width: 801px)').matches;
 }
 
 function todayDateValue(): string {

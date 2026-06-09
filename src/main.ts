@@ -6,6 +6,7 @@ import { registerFontFaces, preloadFonts } from './fonts';
 import { attachInlineEditing } from './field-interaction';
 import { setupDateTimePicker, type DateTimePickerController } from './datetime-picker';
 import { SignatureStampManager, type StoredSignatureStamp } from './signature-stamp';
+import { openStampGenerator } from './stamp-generator';
 import { printPdf, type PdfSaveResult } from './print-pdf';
 import { pushRecentValue } from './recent-values';
 import {
@@ -792,20 +793,34 @@ async function initialize(): Promise<void> {
   });
 
   // 5) 액션 버튼 바인딩
-  signatureInput?.addEventListener('change', async () => {
-    const file = signatureInput.files?.[0];
-    if (!file) return;
+  async function applySignatureFile(file: File, successMessage: string): Promise<void> {
     try {
       await signatureStamp.applyFile(file);
       refreshPreview(wasm);
       updateSignatureButtons();
-      setStatus('도장/서명 이미지를 성명 옆 (인)에 넣었습니다. 계속 쓰려면 브라우저 저장을 누르세요.');
+      setStatus(successMessage);
     } catch (err) {
       console.error(err);
-      signatureInput.value = '';
+      if (signatureInput) signatureInput.value = '';
       updateSignatureButtons();
       setStatus(`도장/서명 이미지 적용 실패: ${describeError(err)}`, true);
     }
+  }
+
+  signatureInput?.addEventListener('change', async () => {
+    const file = signatureInput.files?.[0];
+    if (!file) return;
+    await applySignatureFile(file, '도장/서명 이미지를 성명 옆 (인)에 넣었습니다. 계속 쓰려면 브라우저 저장을 누르세요.');
+  });
+
+  document.getElementById('btn-make-stamp')?.addEventListener('click', () => {
+    const nameControl = formEl.elements.namedItem('성명');
+    openStampGenerator({
+      initialName: nameControl instanceof HTMLInputElement ? nameControl.value.trim() : '',
+      onGenerate: (file) => {
+        void applySignatureFile(file, '만든 도장을 성명 옆 (인)에 넣었습니다. 계속 쓰려면 브라우저 저장을 누르세요.');
+      },
+    });
   });
 
   signatureClearBtn?.addEventListener('click', () => {
