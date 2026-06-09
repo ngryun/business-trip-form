@@ -472,17 +472,32 @@ html, body {
   cursor: pointer;
 }
 .actions button:hover { background: #f3f4f6; }
-.actions #btn-apply { background: #2563eb; color: #fff; border-color: #1d4ed8; }
-.actions #btn-apply:hover { background: #1d4ed8; }
 .actions #btn-download-hwp { background: #059669; color: #fff; border-color: #047857; }
 .actions #btn-download-hwp:hover { background: #047857; }
+/* 모바일 전용 — 폼을 닫고 미리보기를 확인 */
+.mobile-only { display: none; }
 
-.status {
-  margin: 10px 0 0;
-  font-size: 12px;
-  color: #6b7280;
+/* 상태 토스트 — 폼 패널이 닫힌 모바일에서도 보이도록 화면 하단 중앙에 고정 */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 44px;
+  transform: translateX(-50%);
+  z-index: 1100;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: rgba(17, 24, 39, 0.92);
+  color: #f9fafb;
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
 }
-.status.error { color: #b91c1c; }
+.toast.is-visible { opacity: 1; }
+.toast.error { background: #b91c1c; }
 
 .preview-pane {
   position: relative;
@@ -524,20 +539,42 @@ html, body {
   .app-body.panel-collapsed {
     grid-template-columns: 1fr;
   }
+  /* 헤더 높이를 하드코딩하지 않도록 app-body(헤더 아래 영역) 기준으로 절대 배치 */
+  .app-body {
+    position: relative;
+  }
   .form-pane {
-    position: fixed;
-    inset: 56px 0 0 0;
+    position: absolute;
+    inset: 0;
     z-index: 50;
     transform: translateX(-100%);
     transition: transform 0.2s ease;
     border-right: 1px solid #e5e7eb;
     box-shadow: 4px 0 16px rgba(0,0,0,0.1);
-    width: 100vw;
+    width: 100%;
     visibility: visible;
     padding: 16px;
   }
   .app-body:not(.panel-collapsed) .form-pane {
     transform: translateX(0);
+  }
+  .actions .mobile-only {
+    display: block;
+    flex: 1 1 100%;
+    background: #2563eb;
+    color: #ffffff;
+    border-color: #1d4ed8;
+  }
+  .actions .mobile-only:hover { background: #1d4ed8; }
+  /* iOS Safari 는 16px 미만 입력칸에 포커스하면 화면을 강제 확대하므로 모바일은 16px 고정 */
+  .form-pane input,
+  .form-pane select,
+  .form-pane textarea,
+  .field-popover__input,
+  .field-popover__date-input,
+  .field-popover__select-custom-input,
+  .datetime-time__select {
+    font-size: 16px;
   }
 }
 
@@ -766,7 +803,7 @@ html, body {
 .field-popover__cancel:hover { background: #f3f4f6; }
 
 @media print {
-  .app-header, .form-pane, .panel-toggle, .field-popover, .app-footer { display: none; }
+  .app-header, .form-pane, .panel-toggle, .field-popover, .app-footer, .toast { display: none; }
   .app-body { grid-template-columns: 1fr; }
   .preview-pane { background: #ffffff; overflow: visible; }
   #scroll-container { overflow: visible; height: auto; }

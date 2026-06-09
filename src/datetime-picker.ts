@@ -123,8 +123,12 @@ export function setupDateTimePicker(root: HTMLElement, options: DateTimePickerOp
   });
 
   document.addEventListener('click', (e) => {
-    if (!isOpen || options.inline || root.contains(e.target as Node)) return;
-    close();
+    if (!isOpen || options.inline) return;
+    // 날짜/달 이동 클릭은 render() 의 replaceChildren 으로 클릭된 버튼이 DOM 에서 분리된
+    // 뒤에 여기 도달하므로 contains 검사가 실패한다. 이벤트 경로로 내부 클릭을 판별한다.
+    const path = e.composedPath();
+    const inside = path.length > 0 ? path.includes(root) : root.contains(e.target as Node);
+    if (!inside) close();
   });
 
   render();

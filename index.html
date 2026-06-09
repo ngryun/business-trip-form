@@ -14,7 +14,7 @@
       </button>
       <div class="header-text">
         <h1>여비정산신청서 작성</h1>
-        <p class="subtitle">폼에서 한꺼번에 입력하거나, 미리보기에서 누름틀을 직접 클릭해 수정할 수 있습니다.</p>
+        <p class="subtitle">입력하면 미리보기에 바로 반영됩니다. 미리보기의 누름틀을 클릭해 직접 수정할 수도 있습니다.</p>
       </div>
     </header>
 
@@ -69,15 +69,7 @@
             <legend>갈 때</legend>
             <label>일자 <input name="갈때일자" type="date" required /></label>
             <label>교통편
-              <select name="갈때교통편" required>
-                <option value="">선택</option>
-                <option>자가용</option>
-                <option>버스</option>
-                <option>기차/KTX</option>
-                <option>항공</option>
-                <option>지하철</option>
-                <option>택시</option>
-              </select>
+              <input name="갈때교통편" type="text" list="transport-options" placeholder="선택 또는 직접 입력" required />
             </label>
             <label>출발지 <input name="갈때출발지" type="text" required /></label>
             <label>도착지 <input name="갈때도착지" type="text" required /></label>
@@ -87,19 +79,20 @@
             <legend>올 때</legend>
             <label>일자 <input name="올때일자" type="date" required /></label>
             <label>교통편
-              <select name="올때교통편" required>
-                <option value="">선택</option>
-                <option>자가용</option>
-                <option>버스</option>
-                <option>기차/KTX</option>
-                <option>항공</option>
-                <option>지하철</option>
-                <option>택시</option>
-              </select>
+              <input name="올때교통편" type="text" list="transport-options" placeholder="선택 또는 직접 입력" required />
             </label>
             <label>출발지 <input name="올때출발지" type="text" required /></label>
             <label>도착지 <input name="올때도착지" type="text" required /></label>
           </fieldset>
+
+          <datalist id="transport-options">
+            <option>자가용</option>
+            <option>버스</option>
+            <option>기차/KTX</option>
+            <option>항공</option>
+            <option>지하철</option>
+            <option>택시</option>
+          </datalist>
 
           <fieldset>
             <legend>기타</legend>
@@ -110,14 +103,12 @@
           </fieldset>
 
           <div class="actions">
-            <button type="button" id="btn-apply">미리보기에 반영</button>
+            <button type="button" id="btn-show-preview" class="mobile-only">미리보기 확인</button>
             <button type="button" id="btn-download-hwp">HWP 다운로드</button>
             <button type="button" id="btn-print">PDF로 저장 / 인쇄</button>
-            <button type="button" id="btn-share-url" title="현재 입력값이 미리 채워진 URL 을 클립보드에 복사">URL 공유</button>
+            <button type="button" id="btn-share-url" title="현재 입력값이 미리 채워진 URL 을 클립보드에 복사 (값은 서버로 전송되지 않습니다)">URL 공유</button>
             <button type="button" id="btn-reset">초기화</button>
           </div>
-
-          <p class="status" id="status">양식을 불러오는 중...</p>
         </form>
       </section>
 
@@ -128,6 +119,8 @@
         </div>
       </section>
     </div>
+
+    <div id="status" class="toast is-visible" role="status" aria-live="polite">양식을 불러오는 중...</div>
 
     <footer class="app-footer">
       <span>강원 설악고등학교 교사 남궁연</span>

@@ -46,7 +46,7 @@ const APPLICANT_DATALISTS: Record<ApplicantField, string> = {
 };
 const MAX_SAVED_APPLICANTS = 30;
 
-const statusEl = document.getElementById('status') as HTMLParagraphElement;
+const statusEl = document.getElementById('status') as HTMLElement;
 const formEl = document.getElementById('trip-form') as HTMLFormElement;
 const previewContainer = document.getElementById('scroll-container') as HTMLDivElement;
 const appBodyEl = document.querySelector('.app-body') as HTMLDivElement;
@@ -87,9 +87,21 @@ interface SavedFormState {
 type ApplicantField = typeof APPLICANT_FIELDS[number];
 type SavedApplicantInfo = Record<ApplicantField, string> & { updatedAt: string };
 
+let statusHideTimer = 0;
+
+/**
+ * 상태 메시지를 미리보기 위 토스트로 표시한다. 폼 패널이 닫힌 모바일에서도 보이도록
+ * 폼 바깥(#app 직속)에 두고, 일정 시간 후 자동으로 사라진다 (에러는 더 오래 유지).
+ */
 function setStatus(message: string, isError = false): void {
   statusEl.textContent = message;
   statusEl.classList.toggle('error', isError);
+  statusEl.classList.add('is-visible');
+  window.clearTimeout(statusHideTimer);
+  statusHideTimer = window.setTimeout(
+    () => statusEl.classList.remove('is-visible'),
+    isError ? 8000 : 4000,
+  );
 }
 
 function collectFormValues(): Record<string, string> {
@@ -156,6 +168,7 @@ function setupApplicantInfoStorage(): void {
   });
 
   applicantClearBtn?.addEventListener('click', () => {
+    if (!window.confirm('브라우저에 저장된 신청자 정보 목록을 모두 삭제할까요?')) return;
     try {
       localStorage.removeItem(APPLICANT_STORAGE_KEY);
     } catch {
@@ -451,12 +464,22 @@ function ensureSelectOption(select: HTMLSelectElement, value: string): void {
 }
 
 function setupPanelToggle(): void {
-  const isMobile = (): boolean => window.matchMedia('(max-width: 800px)').matches;
+  const mobileQuery = window.matchMedia('(max-width: 800px)');
+  const syncAria = (): void => {
+    toggleBtn.setAttribute('aria-expanded', String(!appBodyEl.classList.contains('panel-collapsed')));
+  };
   // 모바일은 기본 접힘 (미리보기 우선), 데스크톱은 기본 펼침
-  if (isMobile()) appBodyEl.classList.add('panel-collapsed');
+  if (mobileQuery.matches) appBodyEl.classList.add('panel-collapsed');
+  // 창 크기 변경/기기 회전으로 모바일 ↔ 데스크톱이 바뀌면 그 시점의 기본 상태로 보정
+  mobileQuery.addEventListener('change', (e) => {
+    appBodyEl.classList.toggle('panel-collapsed', e.matches);
+    syncAria();
+  });
   toggleBtn.addEventListener('click', () => {
     appBodyEl.classList.toggle('panel-collapsed');
+    syncAria();
   });
+  syncAria();
 }
 
 function setupDateTimeControls(): void {
@@ -598,7 +621,7 @@ async function initialize(): Promise<void> {
   await preloadFonts();
 
   // 1) HWP 양식 fetch + 로드
-  const { wasm, docInfo } = await loadTemplate(TEMPLATE_URL);
+  const { wasm, docInfo, templateBytes } = await loadTemplate(TEMPLATE_URL);
 
   // 1.5) 문서가 실제로 쓰는 폰트들을 적극 프리로드한 뒤 레이아웃 폭 측정값을 갱신
   await preloadFonts(docInfo.fontsUsed ?? []);
@@ -627,11 +650,46 @@ async function initialize(): Promise<void> {
   setPreviewReloadHook(() => {
     if (signatureStamp.hasStamp()) signatureStamp.reapplyPlacement();
   });
+
+  function hasFilledRangeField(): boolean {
+    return (fields.get('시작일시') ?? []).some((entry) => entry.value.trim() !== '');
+  }
+
+  /**
+   * 문서를 원본 양식 상태로 다시 로드한다.
+   *
+   * rhwp 0.7.11 은 같은 셀에 시작·종료 누름틀이 나란히 있는 구조에서, 값이 있는 시작일시
+   * 누름틀을 빈 값으로 덮으면(setFieldValue '') 뒤따르는 종료일시 누름틀의 범위 인덱스가
+   * 빈 문단을 벗어나 WASM 이 panic 하고, 그 뒤로는 모든 엔진 호출이 "recursive use" 로
+   * 실패한다(페이지 새로고침 전까지 복구 불가). 그래서 범위를 비워야 할 때는 지우는 대신
+   * 원본 바이트를 다시 로드하고 나머지 값을 처음부터 채운다.
+   */
+  function reloadPristineTemplate(): void {
+    const storedStamp = signatureStamp.getStoredStamp();
+    const hadStamp = signatureStamp.hasStamp();
+    signatureStamp.forgetDocumentState();
+    wasm.loadDocument(templateBytes);
+    fields = discoverFields(wasm);
+    removeDateTimeRangeSeparator(wasm, fields);
+    wasm.refreshLayout();
+    fields = discoverFields(wasm);
+    if (hadStamp && storedStamp) {
+      try {
+        signatureStamp.applyStored(storedStamp);
+      } catch (err) {
+        console.warn('[web-form] 양식 재로드 후 도장/서명 재적용 실패:', err);
+      }
+    }
+  }
+
   function applyCollectedValuesToPreview(
     statusMessage?: string,
     options: PreviewApplyOptions = {},
   ): void {
     const { 시작일시: rangeText, ...values } = collectFormValues();
+    if (options.clearEmpty && !rangeText && hasFilledRangeField()) {
+      reloadPristineTemplate();
+    }
     const { applied, missing } = setFieldValues(wasm, fields, values, {
       clearEmpty: options.clearEmpty,
     });
@@ -778,6 +836,7 @@ async function initialize(): Promise<void> {
   });
 
   signatureClearSavedBtn?.addEventListener('click', () => {
+    if (!window.confirm('브라우저에 저장된 도장/서명 이미지를 삭제할까요?')) return;
     if (!clearStoredSignatureStamp()) {
       setStatus('브라우저 저장소를 사용할 수 없어 저장된 이미지를 삭제하지 못했습니다.', true);
       return;
@@ -824,19 +883,16 @@ async function initialize(): Promise<void> {
       : '방금 업로드한 이미지 사용 중 — 다음 방문에도 쓰려면 "브라우저 저장"';
   }
 
-  document.getElementById('btn-apply')!.addEventListener('click', () => {
-    try {
-      saveFormState();
-      pushRecentValuesFromForm();
-      applyCollectedValuesToPreview('{applied}개 필드에 반영했습니다.', { clearEmpty: true });
-    } catch (err) {
-      console.error(err);
-      setStatus(`반영 실패: ${(err as Error).message}`, true);
-    }
+  // 모바일 전용 — 폼을 닫고 미리보기를 보여준다. 입력은 이미 자동 반영되어 있다.
+  document.getElementById('btn-show-preview')?.addEventListener('click', () => {
+    pushRecentValuesFromForm();
+    appBodyEl.classList.add('panel-collapsed');
+    toggleBtn.setAttribute('aria-expanded', 'false');
   });
 
   document.getElementById('btn-download-hwp')!.addEventListener('click', async () => {
     try {
+      pushRecentValuesFromForm();
       const fileName = suggestFileName(collectFormValues());
       setStatus('HWP 다운로드 준비 중...');
       await downloadHwp(wasm, fileName);
@@ -851,6 +907,7 @@ async function initialize(): Promise<void> {
     const btn = document.getElementById('btn-print') as HTMLButtonElement;
     btn.disabled = true;
     try {
+      pushRecentValuesFromForm();
       const fileName = suggestPdfFileName(collectFormValues());
       setStatus('PDF를 준비 중...');
       const result = await printPdf(wasm, fileName);
@@ -867,6 +924,7 @@ async function initialize(): Promise<void> {
     const btn = document.getElementById('btn-share-url') as HTMLButtonElement | null;
     if (btn) btn.disabled = true;
     try {
+      pushRecentValuesFromForm();
       const url = buildShareUrl(collectRawFormValues());
       const copied = await copyTextToClipboard(url);
       if (copied) {
@@ -885,6 +943,9 @@ async function initialize(): Promise<void> {
   });
 
   document.getElementById('btn-reset')!.addEventListener('click', () => {
+    if (!window.confirm('작성 중인 모든 입력과 임시 저장 내용을 지울까요?')) return;
+    // 입력 직후 초기화하면 120ms 디바운스 타이머가 옛 입력값을 다시 반영할 수 있어 먼저 취소
+    window.clearTimeout(livePreviewTimer);
     const removedStamp = signatureStamp.clear();
     formEl.reset();
     autoTravelDates.clear();
@@ -929,7 +990,7 @@ async function initialize(): Promise<void> {
 function suggestFileName(values: Record<string, string>): string {
   const date = values.제출날짜.replace(/[. ]/g, '').slice(0, 8) || 'undated';
   const who = (values.성명 || 'anonymous').replace(/\s/g, '');
-  return `출장신청서_${who}_${date}.hwp`;
+  return `여비정산신청서_${who}_${date}.hwp`;
 }
 
 function suggestPdfFileName(values: Record<string, string>): string {

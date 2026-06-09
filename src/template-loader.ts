@@ -8,7 +8,7 @@ import type { DocumentInfo } from '@/core/types';
  * - 이 앱은 Tauri 런타임이 아니므로 WasmBridge 를 직접 생성한다
  *   (HOP studio-host 의 bridge-factory 분기에 의존하지 않음)
  */
-export async function loadTemplate(url: string): Promise<{ wasm: WasmBridge; docInfo: DocumentInfo }> {
+export async function loadTemplate(url: string): Promise<{ wasm: WasmBridge; docInfo: DocumentInfo; templateBytes: Uint8Array }> {
   const wasm = new WasmBridge();
   await wasm.initialize();
 
@@ -30,5 +30,7 @@ export async function loadTemplate(url: string): Promise<{ wasm: WasmBridge; doc
   const fileName = url.split('/').pop() ?? 'template.hwp';
   const docInfo = wasm.loadDocument(bytes, fileName);
 
-  return { wasm, docInfo };
+  // 원본 바이트를 함께 반환 — 값이 있는 범위 누름틀을 비울 때 엔진 panic 을 피하려고
+  // 문서를 원본 상태로 다시 로드하는 우회 경로(main.ts)에서 사용한다.
+  return { wasm, docInfo, templateBytes: bytes };
 }

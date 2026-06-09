@@ -167,6 +167,18 @@ export class SignatureStampManager {
     return this.ref !== null;
   }
 
+  /**
+   * 문서를 통째로 다시 로드해 그림 컨트롤 참조가 무효가 됐을 때 호출.
+   * clear() 와 달리 (이미 사라진) 문서 쪽 컨트롤은 건드리지 않고 내부 상태만 비운다 —
+   * 옛 paraIdx/controlIdx 로 deletePictureControl 을 부르면 새 문서의 엉뚱한 컨트롤을
+   * 지울 수 있기 때문이다.
+   */
+  forgetDocumentState(): void {
+    this.ref = null;
+    this.size = null;
+    this.stored = null;
+  }
+
   private insertPlaceholder(image: PreparedImage, size: { width: number; height: number }): StampRef {
     // 픽처를 실제 크기(HWPUNIT)로 한 번에 넣으면, 그 그림이 들어간 문단이 본문 페이지 흐름을 한 줄만큼
     // 밀어 (인) 가 다음 페이지로 넘어간다. 그 결과 origin 측 페이지(0)와 target 측 페이지(1)가 달라져
