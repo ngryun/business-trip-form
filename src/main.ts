@@ -4,6 +4,7 @@ import { downloadHwp } from './download';
 import { mountPreview, refreshPreview, setPreviewReloadHook } from './preview';
 import { registerFontFaces, preloadFonts } from './fonts';
 import { attachInlineEditing } from './field-interaction';
+import { showStampPopover } from './field-popover';
 import { setupDateTimePicker, type DateTimePickerController } from './datetime-picker';
 import { SignatureStampManager, type StoredSignatureStamp } from './signature-stamp';
 import { openStampGenerator } from './stamp-generator';
@@ -55,6 +56,7 @@ const toggleBtn = document.getElementById('btn-toggle-panel') as HTMLButtonEleme
 const applicantSaveBtn = document.getElementById('btn-save-applicant') as HTMLButtonElement | null;
 const applicantClearBtn = document.getElementById('btn-clear-applicants') as HTMLButtonElement | null;
 const signatureInput = document.getElementById('signature-image') as HTMLInputElement | null;
+const signatureRotateBtn = document.getElementById('btn-rotate-signature') as HTMLButtonElement | null;
 const signatureClearBtn = document.getElementById('btn-clear-signature') as HTMLButtonElement | null;
 const signatureSaveBtn = document.getElementById('btn-save-signature') as HTMLButtonElement | null;
 const signatureClearSavedBtn = document.getElementById('btn-clear-saved-signature') as HTMLButtonElement | null;
@@ -368,12 +370,16 @@ function normalizeStoredSignatureStamp(raw: unknown): StoredSignatureStamp | nul
   ) {
     return null;
   }
+  const rotationDeg = typeof item.rotationDeg === 'number'
+    ? Math.min(10, Math.max(0, Math.round(item.rotationDeg)))
+    : 0;
   return {
     mime: 'image/png',
     dataUrl: item.dataUrl,
     widthPx: Math.max(1, Math.round(item.widthPx)),
     heightPx: Math.max(1, Math.round(item.heightPx)),
     updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : '',
+    ...(rotationDeg > 0 ? { rotationDeg } : {}),
   };
 }
 
@@ -768,12 +774,26 @@ async function initialize(): Promise<void> {
     scheduleLivePreview();
   });
 
-  // 4) 인라인 편집 핸들러 부착
+  // 4) 인라인 편집 핸들러 부착 — 누름틀 + (인)/도장 영역
   attachInlineEditing({
     wasm,
     canvasView,
     container: previewContainer,
     getFields: () => fields,
+    stamp: {
+      getRect: () => signatureStamp.getInteractionRect(),
+      onOpen: (anchor) => {
+        showStampPopover({
+          anchor,
+          hasStamp: signatureStamp.hasStamp(),
+          rotationDeg: signatureStamp.getRotationDeg(),
+          onPickImage: () => signatureInput?.click(),
+          onMakeStamp: openStampGeneratorWithName,
+          onRotate: rotateSignatureTo,
+          onClear: clearSignatureFromDocument,
+        });
+      },
+    },
     onAfterEdit: (label, value) => {
       syncFormFromInline(label, value);
       if (label === '시작일시' || label === '종료일시') {
@@ -813,7 +833,8 @@ async function initialize(): Promise<void> {
     await applySignatureFile(file, '도장/서명 이미지를 성명 옆 (인)에 넣었습니다. 계속 쓰려면 브라우저 저장을 누르세요.');
   });
 
-  document.getElementById('btn-make-stamp')?.addEventListener('click', () => {
+  /** 이름 → 막도장 생성기. 사이드패널 버튼과 미리보기 도장 메뉴가 공유한다. */
+  function openStampGeneratorWithName(): void {
     const nameControl = formEl.elements.namedItem('성명');
     openStampGenerator({
       initialName: nameControl instanceof HTMLInputElement ? nameControl.value.trim() : '',
@@ -821,9 +842,24 @@ async function initialize(): Promise<void> {
         void applySignatureFile(file, '만든 도장을 성명 옆 (인)에 넣었습니다. 계속 쓰려면 브라우저 저장을 누르세요.');
       },
     });
-  });
+  }
 
-  signatureClearBtn?.addEventListener('click', () => {
+  /** 도장 기울기를 deg(0~10°)로 적용하고 미리보기/버튼/상태 메시지를 갱신한다. */
+  function rotateSignatureTo(deg: number): boolean {
+    if (!signatureStamp.hasStamp()) return false;
+    if (!signatureStamp.rotate(deg)) {
+      setStatus('도장 회전에 실패했습니다.', true);
+      return false;
+    }
+    refreshPreview(wasm);
+    updateSignatureButtons();
+    setStatus(deg === 0
+      ? '도장 회전을 원래대로(0°) 되돌렸습니다.'
+      : `도장을 ${deg}° 기울였습니다. 계속 쓰려면 브라우저 저장을 누르세요.`);
+    return true;
+  }
+
+  function clearSignatureFromDocument(): void {
     const removed = signatureStamp.clear();
     if (signatureInput) signatureInput.value = '';
     updateSignatureButtons();
@@ -833,7 +869,16 @@ async function initialize(): Promise<void> {
     } else {
       setStatus('삭제할 도장/서명 이미지가 없습니다.');
     }
+  }
+
+  document.getElementById('btn-make-stamp')?.addEventListener('click', openStampGeneratorWithName);
+
+  signatureRotateBtn?.addEventListener('click', () => {
+    if (!signatureStamp.hasStamp()) return;
+    rotateSignatureTo((signatureStamp.getRotationDeg() + 2) % 12); // 0→2→…→10→0 순환
   });
+
+  signatureClearBtn?.addEventListener('click', clearSignatureFromDocument);
 
   signatureSaveBtn?.addEventListener('click', () => {
     const stored = signatureStamp.getStoredStamp();
@@ -870,6 +915,10 @@ async function initialize(): Promise<void> {
   }
 
   function updateSignatureButtons(): void {
+    if (signatureRotateBtn) {
+      signatureRotateBtn.disabled = !signatureStamp.hasStamp();
+      signatureRotateBtn.textContent = `회전 ${signatureStamp.getRotationDeg()}°`;
+    }
     if (signatureClearBtn) signatureClearBtn.disabled = !signatureStamp.hasStamp();
     if (signatureSaveBtn) signatureSaveBtn.disabled = !signatureStamp.getStoredStamp();
     if (signatureClearSavedBtn) signatureClearSavedBtn.disabled = !hasStoredSignatureStamp();

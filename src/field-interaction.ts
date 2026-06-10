@@ -35,6 +35,13 @@ export interface InlineEditDeps {
   getFields: () => FieldMap;
   /** 편집 적용 직후 호출 — 미리보기 갱신·필드 재스캔·폼 동기화 등 */
   onAfterEdit: (label: string, value: string) => void;
+  /** (인)/도장 영역 상호작용 — 제공되면 미리보기에서 클릭으로 도장 메뉴를 연다 */
+  stamp?: {
+    /** 페이지 좌표 기준 클릭 영역 ((인) 표식 ∪ 현재 도장). 없으면 null */
+    getRect: () => PageRect | null;
+    /** 영역 클릭 시 호출 — 도장 메뉴 팝오버를 띄운다 */
+    onOpen: (anchor: { x: number; y: number }) => void;
+  };
 }
 
 interface FieldHit {
@@ -83,7 +90,7 @@ interface FieldLocationPathEntry {
 }
 
 export function attachInlineEditing(deps: InlineEditDeps): () => void {
-  const { wasm, canvasView, container, getFields, onAfterEdit } = deps;
+  const { wasm, canvasView, container, getFields, onAfterEdit, stamp } = deps;
   const scrollContent = container.querySelector<HTMLElement>('#scroll-content');
   if (!scrollContent) return () => undefined;
 
@@ -98,11 +105,20 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
   const onClick = (e: MouseEvent): void => {
     if (isPopoverOpen()) return;
     const hit = resolveFieldAt(e);
-    if (!hit) return;
-    e.preventDefault();
-    e.stopPropagation();
-    hideHighlight();
-    openPopoverFor(hit, { x: e.clientX, y: e.clientY });
+    if (hit) {
+      e.preventDefault();
+      e.stopPropagation();
+      hideHighlight();
+      openPopoverFor(hit, { x: e.clientX, y: e.clientY });
+      return;
+    }
+    const stampRect = resolveStampAt(e);
+    if (stampRect && stamp) {
+      e.preventDefault();
+      e.stopPropagation();
+      hideHighlight();
+      stamp.onOpen({ x: e.clientX, y: e.clientY });
+    }
   };
 
   const onMove = (e: MouseEvent): void => {
@@ -118,13 +134,19 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
         return;
       }
       const hit = resolveFieldAt(ev);
-      if (!hit) {
-        scrollContent.style.cursor = '';
-        hideHighlight();
+      if (hit) {
+        scrollContent.style.cursor = 'pointer';
+        showHighlight(hit);
         return;
       }
-      scrollContent.style.cursor = 'pointer';
-      showHighlight(hit);
+      const stampRect = resolveStampAt(ev);
+      if (stampRect) {
+        scrollContent.style.cursor = 'pointer';
+        showRectHighlight(stampRect);
+        return;
+      }
+      scrollContent.style.cursor = '';
+      hideHighlight();
     });
   };
 
@@ -139,8 +161,8 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
     if (isPopoverOpen()) closeFieldPopover();
   };
 
-  /** 마우스 이벤트 → 누름틀 정보 (FIELD_CONFIGS 에 등록된 라벨만) */
-  function resolveFieldAt(e: MouseEvent): FieldHit | null {
+  /** 마우스 이벤트 → (페이지 인덱스, 페이지 좌표). 페이지 밖이면 null */
+  function toPagePoint(e: MouseEvent): { pageIdx: number; pageX: number; pageY: number } | null {
     const virtualScroll = canvasView.getVirtualScroll();
     const viewportManager = canvasView.getViewportManager();
     const zoom = viewportManager.getZoom();
@@ -159,8 +181,43 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
 
     const pageOffset = virtualScroll.getPageOffset(pageIdx);
     const pageLeft = virtualScroll.getPageLeftResolved(pageIdx, scrollContent!.clientWidth);
-    const pageX = (contentX - pageLeft) / zoom;
-    const pageY = (contentY - pageOffset) / zoom;
+    return {
+      pageIdx,
+      pageX: (contentX - pageLeft) / zoom,
+      pageY: (contentY - pageOffset) / zoom,
+    };
+  }
+
+  // (인)/도장 영역은 wasm 텍스트 스캔이 필요해서 mousemove 마다 새로 구하지 않고 잠시 캐시한다.
+  let stampRectCache: { rect: PageRect | null; at: number } | null = null;
+  function getStampRect(): PageRect | null {
+    if (!stamp) return null;
+    const now = Date.now();
+    if (stampRectCache && now - stampRectCache.at < 800) return stampRectCache.rect;
+    let rect: PageRect | null = null;
+    try { rect = stamp.getRect(); } catch { /* noop */ }
+    stampRectCache = { rect, at: now };
+    return rect;
+  }
+
+  /** 마우스가 (인)/도장 영역 위에 있으면 그 페이지 사각형을 반환 */
+  function resolveStampAt(e: MouseEvent): PageRect | null {
+    if (!stamp) return null;
+    const rect = getStampRect();
+    if (!rect) return null;
+    const point = toPagePoint(e);
+    if (!point || point.pageIdx !== rect.pageIndex) return null;
+    const pad = 6;
+    if (point.pageX < rect.x - pad || point.pageX > rect.x + rect.width + pad) return null;
+    if (point.pageY < rect.y - pad || point.pageY > rect.y + rect.height + pad) return null;
+    return rect;
+  }
+
+  /** 마우스 이벤트 → 누름틀 정보 (FIELD_CONFIGS 에 등록된 라벨만) */
+  function resolveFieldAt(e: MouseEvent): FieldHit | null {
+    const point = toPagePoint(e);
+    if (!point) return null;
+    const { pageIdx, pageX, pageY } = point;
 
     let pos: HitTestResult;
     try {
@@ -357,7 +414,8 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
     fi: FieldInfoResult,
     pageX: number,
   ): string {
-    if (label !== '시작일시' || !getFields().has('종료일시')) return label;
+    // 시작일시 누름틀 하나가 범위 전체를 담으므로, 오른쪽(종료 쪽)을 클릭하면 종료 탭으로 연다.
+    if (label !== '시작일시') return label;
 
     const rect = getFieldPageRect(pos, fi);
     if (!rect || rect.width <= 0) return label;
@@ -399,6 +457,26 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
       el.style.width = `${c.width + pad * 2}px`;
       el.style.height = `${c.height + pad * 2}px`;
       hlFieldId = hit.fieldId;
+    }
+    el.style.display = 'block';
+  }
+
+  /** 필드가 아닌 임의 페이지 사각형((인)/도장 영역)에 호버 하이라이트를 표시 */
+  const STAMP_HIGHLIGHT_ID = -999;
+  function showRectHighlight(rect: PageRect): void {
+    const el = ensureHighlightEl();
+    if (hlFieldId !== STAMP_HIGHLIGHT_ID) {
+      const c = pageRectToContent(rect);
+      if (!c || c.width <= 0 || c.height <= 0) {
+        hideHighlight();
+        return;
+      }
+      const pad = 2;
+      el.style.left = `${c.left - pad}px`;
+      el.style.top = `${c.top - pad}px`;
+      el.style.width = `${c.width + pad * 2}px`;
+      el.style.height = `${c.height + pad * 2}px`;
+      hlFieldId = STAMP_HIGHLIGHT_ID;
     }
     el.style.display = 'block';
   }

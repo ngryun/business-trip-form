@@ -932,6 +932,56 @@ html, body {
 .field-popover__next:hover { background: #e0e7ff !important; }
 .field-popover__cancel:hover { background: #f3f4f6; }
 
+/* 미리보기 (인)/도장 메뉴 */
+.field-popover--stamp { min-width: 240px; }
+.field-popover__stamp-rotate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 10px;
+}
+.field-popover__stamp-rotate .field-popover__recent-label {
+  flex: 0 0 auto;
+  min-width: 64px;
+}
+.field-popover__stamp-rotate input[type="range"] {
+  flex: 1;
+  min-width: 120px;
+  accent-color: #2563eb;
+}
+.field-popover__stamp-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.field-popover__stamp-action {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #f9fafb;
+  font-size: 13px;
+  font-family: inherit;
+  color: #1f2937;
+  text-align: left;
+  cursor: pointer;
+}
+.field-popover__stamp-action:hover,
+.field-popover__stamp-action:focus {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  outline: none;
+}
+.field-popover__stamp-action--danger {
+  color: #b91c1c;
+}
+.field-popover__stamp-action--danger:hover,
+.field-popover__stamp-action--danger:focus {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
 @media print {
   .app-header, .form-pane, .panel-toggle, .field-popover, .app-footer, .toast { display: none; }
   .app-body { grid-template-columns: 1fr; }

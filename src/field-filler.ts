@@ -222,6 +222,54 @@ export function fillDateTimeRange(
   forceBlackOnFields(wasm, filled);
 }
 
+/**
+ * 값이 비어 있는 모든 누름틀의 안내문구(빨간 placeholder)를 잠시 감춘다.
+ *
+ * 인쇄/PDF 는 미리보기와 같은 엔진 렌더러를 쓰므로, 안내문구를 비우지 않으면
+ * 출력물에도 빨간 안내문이 그대로 찍힌다. 반환된 함수를 호출하면 원래 안내문구로 복원된다.
+ */
+export function suppressEmptyFieldGuides(wasm: WasmBridge): () => void {
+  const saved: Array<{ fieldId: number; guide: string }> = [];
+  for (const f of wasm.getFieldList()) {
+    if ((f.value ?? '').trim() !== '') continue;
+    try {
+      const props = (wasm as any).getClickHereProps?.(f.fieldId);
+      if (!props?.ok || !props.guide) continue;
+      (wasm as any).updateClickHereProps?.(
+        f.fieldId,
+        '',
+        props.memo ?? '',
+        props.name ?? '',
+        props.editable ?? true,
+      );
+      saved.push({ fieldId: f.fieldId, guide: props.guide });
+    } catch {
+      // 개별 필드 실패는 출력 자체를 막지 않는다.
+    }
+  }
+  if (saved.length > 0) wasm.refreshLayout();
+
+  return () => {
+    if (saved.length === 0) return;
+    for (const { fieldId, guide } of saved) {
+      try {
+        const props = (wasm as any).getClickHereProps?.(fieldId);
+        if (!props?.ok) continue;
+        (wasm as any).updateClickHereProps?.(
+          fieldId,
+          guide,
+          props.memo ?? '',
+          props.name ?? '',
+          props.editable ?? true,
+        );
+      } catch {
+        // noop
+      }
+    }
+    wasm.refreshLayout();
+  };
+}
+
 /** 누름틀 안내문구(guide)를 비워 화면에 placeholder 가 남지 않게 한다 (name 은 유지해 재탐색 가능). */
 function clearFieldGuide(wasm: WasmBridge, fieldId: number): void {
   try {

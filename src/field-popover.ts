@@ -41,6 +41,20 @@ export interface DateTimeRangePopoverArgs {
   startValue: string;
 }
 
+export interface StampPopoverArgs {
+  anchor: { x: number; y: number };
+  hasStamp: boolean;
+  rotationDeg: number;
+  /** 파일 선택 대화상자 열기 (기존 도장이 있으면 교체) */
+  onPickImage: () => void;
+  /** 이름 → 막도장 생성기 열기 */
+  onMakeStamp: () => void;
+  /** 기울기 변경 (0~10°). 적용 성공 여부 반환 — 실패 시 슬라이더를 원래 값으로 되돌린다. */
+  onRotate: (deg: number) => boolean;
+  /** 문서에서 도장 삭제 */
+  onClear: () => void;
+}
+
 /** 학교 출장에서 흔한 시간 패턴 — 시작 탭에서 고른 날짜(없으면 오늘)에 한 번에 적용한다. */
 const RANGE_PRESETS: Array<{ label: string; startTime: string; endTime: string; nextDay?: boolean }> = [
   { label: '하루 09–18', startTime: '09:00', endTime: '18:00' },
@@ -335,6 +349,114 @@ export function showDateTimeRangePopover(args: DateTimeRangePopoverArgs): void {
   currentCleanup = () => document.removeEventListener('mousedown', onOuter, { capture: true } as any);
 
   setTimeout(() => focusInput(activeTab === 'end' ? endPicker : startPicker), 0);
+  currentPopover = root;
+}
+
+/**
+ * 미리보기에서 (인)/도장 영역을 클릭했을 때 뜨는 도장 메뉴.
+ *
+ * - 도장이 있으면: 기울기 슬라이더(0~10°, 놓는 순간 적용) + 교체/다시 만들기/삭제
+ * - 도장이 없으면: 이미지 선택 / 도장 만들기
+ */
+export function showStampPopover(args: StampPopoverArgs): void {
+  closeFieldPopover();
+
+  const root = document.createElement('div');
+  root.className = 'field-popover field-popover--stamp';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-label', '도장/서명');
+
+  const titleEl = document.createElement('div');
+  titleEl.className = 'field-popover__title';
+  titleEl.textContent = '도장/서명';
+  root.appendChild(titleEl);
+
+  if (args.hasStamp) {
+    const rotateRow = document.createElement('div');
+    rotateRow.className = 'field-popover__stamp-rotate';
+
+    const rotateLabel = document.createElement('span');
+    rotateLabel.className = 'field-popover__recent-label';
+
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '0';
+    slider.max = '10';
+    slider.step = '1';
+    slider.value = String(args.rotationDeg);
+    slider.setAttribute('aria-label', '도장 기울기 (0~10도)');
+
+    const syncLabel = (): void => {
+      rotateLabel.textContent = `기울기 ${slider.value}°`;
+    };
+    syncLabel();
+
+    let appliedDeg = args.rotationDeg;
+    slider.addEventListener('input', syncLabel);
+    // 드래그 중 매번 적용하면 미리보기 재파싱이 잦아지므로, 놓는 순간(change)에만 적용한다.
+    slider.addEventListener('change', () => {
+      const next = Number(slider.value);
+      if (next === appliedDeg) return;
+      if (args.onRotate(next)) {
+        appliedDeg = next;
+      } else {
+        slider.value = String(appliedDeg);
+        syncLabel();
+      }
+    });
+
+    rotateRow.append(rotateLabel, slider);
+    root.appendChild(rotateRow);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'field-popover__stamp-actions';
+  const addAction = (label: string, danger: boolean, handler: () => void): void => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `field-popover__stamp-action${danger ? ' field-popover__stamp-action--danger' : ''}`;
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+      closeFieldPopover();
+      handler();
+    });
+    actions.appendChild(btn);
+  };
+  addAction(args.hasStamp ? '이미지 교체 (파일 선택)' : '이미지 선택 (파일)', false, args.onPickImage);
+  addAction(args.hasStamp ? '도장 다시 만들기 (이름 → 도장)' : '도장 만들기 (이름 → 도장)', false, args.onMakeStamp);
+  if (args.hasStamp) addAction('문서에서 삭제', true, args.onClear);
+  root.appendChild(actions);
+
+  const buttons = document.createElement('div');
+  buttons.className = 'field-popover__buttons';
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'field-popover__cancel';
+  closeBtn.textContent = '닫기';
+  closeBtn.addEventListener('click', () => closeFieldPopover());
+  buttons.appendChild(closeBtn);
+  root.appendChild(buttons);
+
+  root.addEventListener('keydown', (e) => {
+    if ((e as KeyboardEvent).key === 'Escape') {
+      e.preventDefault();
+      closeFieldPopover();
+    }
+  });
+
+  document.body.appendChild(root);
+  positionNear(root, args.anchor);
+
+  const onOuter = (e: MouseEvent): void => {
+    if (!root.contains(e.target as Node)) closeFieldPopover();
+  };
+  setTimeout(() => document.addEventListener('mousedown', onOuter, { capture: true }), 0);
+  currentCleanup = () => document.removeEventListener('mousedown', onOuter, { capture: true } as any);
+
+  setTimeout(() => {
+    root.querySelector<HTMLElement>('input, button')?.focus();
+  }, 0);
+
   currentPopover = root;
 }
 

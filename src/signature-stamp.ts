@@ -26,9 +26,11 @@ export interface StoredSignatureStamp {
   widthPx: number;
   heightPx: number;
   updatedAt?: string;
+  /** 0~10°. 그림 컨트롤의 HWP 네이티브 rotationAngle 로 적용된다 (이미지 자체는 원본 유지). */
+  rotationDeg?: number;
 }
 
-interface PageRect {
+export interface PageRect {
   pageIndex: number;
   x: number;
   y: number;
@@ -80,6 +82,62 @@ export class SignatureStampManager {
 
   getStoredStamp(): StoredSignatureStamp | null {
     return this.stored;
+  }
+
+  getRotationDeg(): number {
+    return this.stored?.rotationDeg ?? 0;
+  }
+
+  /**
+   * 미리보기에서 도장 클릭 영역으로 쓸 페이지 좌표 — (인) 표식과 현재 도장 영역의 합집합.
+   * 도장이 없으면 (인) 표식만, (인) 을 못 찾으면 도장 영역만 반환한다.
+   */
+  getInteractionRect(): PageRect | null {
+    let target: PageRect | null = null;
+    try { target = findSignatureTarget(this.wasm); } catch { /* noop */ }
+    const stamp = this.ref ? this.findPictureLayout(this.ref) : null;
+    if (!target) return stamp;
+    if (!stamp || stamp.pageIndex !== target.pageIndex) return target;
+    const x = Math.min(target.x, stamp.x);
+    const y = Math.min(target.y, stamp.y);
+    return {
+      pageIndex: target.pageIndex,
+      x,
+      y,
+      width: Math.max(target.x + target.width, stamp.x + stamp.width) - x,
+      height: Math.max(target.y + target.height, stamp.y + stamp.height) - y,
+    };
+  }
+
+  /**
+   * 도장이 손으로 찍은 듯 살짝 기울어 보이도록 회전(0~10°)한다.
+   *
+   * 그림을 삭제/재삽입하지 않고 기존 컨트롤의 HWP 네이티브 rotationAngle 만 바꾼다 —
+   * 재삽입을 반복하면 앵커 문단에 줄이 남아 문서가 한 줄씩 길어지는 문제(엔진 한계)가 있어,
+   * 컨트롤을 유지한 채 속성만 갱신한다. 위치·크기는 그대로이고 중심 기준으로 기울어진다.
+   */
+  rotate(deg: number): boolean {
+    if (!this.ref || !this.size || !this.stored) return false;
+    const clamped = Math.min(10, Math.max(0, Math.round(deg)));
+    this.stored = {
+      ...this.stored,
+      rotationDeg: clamped > 0 ? clamped : undefined,
+      updatedAt: new Date().toISOString(),
+    };
+    try {
+      const props = this.wasm.getPictureProperties(this.ref.sec, this.ref.paraIdx, this.ref.controlIdx);
+      const result = this.setStampProperties(
+        this.ref,
+        this.size,
+        props.horzOffset / HWPUNIT_PER_PAGE_PX,
+        props.vertOffset / HWPUNIT_PER_PAGE_PX,
+      );
+      if (!result.ok) return false;
+      this.wasm.refreshLayout();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private applyPreparedImage(image: PreparedImage, stored: StoredSignatureStamp): void {
@@ -228,6 +286,8 @@ export class SignatureStampManager {
       cropTop: 0,
       cropRight: 0,
       cropBottom: 0,
+      // 손으로 찍은 듯한 기울임 (0~10°) — HWP 네이티브 회전이라 다운로드 hwp 에도 유지된다.
+      rotationAngle: this.stored?.rotationDeg ?? 0,
       description: 'signature-stamp',
     });
   }

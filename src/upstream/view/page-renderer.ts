@@ -203,7 +203,15 @@ export class PageRenderer {
         // WebCanvasRenderer 의 워터마크 alpha 정책과 동기화 (#677).
         el.style.opacity = '0.17';
       }
-      // transform (회전/플립) — 작업 우선순위 낮음, 본 사이클은 미적용
+      // transform (회전/플립) — HWP rotationAngle/flip 을 CSS 로 적용 (중심 기준 회전)
+      const t = img.transform;
+      if (t && (t.rotation || t.horzFlip || t.vertFlip)) {
+        const parts: string[] = [];
+        if (t.rotation) parts.push(`rotate(${t.rotation}deg)`);
+        if (t.horzFlip) parts.push('scaleX(-1)');
+        if (t.vertFlip) parts.push('scaleY(-1)');
+        el.style.transform = parts.join(' ');
+      }
       layer.appendChild(el);
     }
     return layer;

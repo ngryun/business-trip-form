@@ -1,4 +1,5 @@
 import type { WasmBridge } from '@/core/wasm-bridge';
+import { suppressEmptyFieldGuides } from './field-filler';
 
 const PX_PER_INCH = 96;
 const PT_PER_INCH = 72;
@@ -40,20 +41,30 @@ export async function printPdf(wasm: WasmBridge, fileName = '출장신청서.pdf
   const pageCount = wasm.pageCount;
   if (pageCount === 0) throw new Error('인쇄할 페이지가 없습니다.');
 
-  if (shouldUseFilePdfSave()) {
-    const pdfBlob = await createPdfBlob(wasm);
-    return savePdfBlob(pdfBlob, ensurePdfExtension(fileName));
+  // 출력물에는 빈 누름틀의 빨간 안내문구가 찍히지 않도록, 렌더링 동안만 안내문구를 감춘다.
+  const restoreGuides = suppressEmptyFieldGuides(wasm);
+  let pdfBlob: Blob | null = null;
+  const pages: PrintPage[] = [];
+  try {
+    if (shouldUseFilePdfSave()) {
+      pdfBlob = await createPdfBlob(wasm);
+    } else {
+      for (let i = 0; i < pageCount; i += 1) {
+        const info = wasm.getPageInfo(i);
+        const canvas = renderPageCanvas(wasm, i);
+        pages.push({
+          dataUrl: canvas.toDataURL('image/png'),
+          widthMm: pxToMm(info.width),
+          heightMm: pxToMm(info.height),
+        });
+      }
+    }
+  } finally {
+    restoreGuides();
   }
 
-  const pages: PrintPage[] = [];
-  for (let i = 0; i < pageCount; i += 1) {
-    const info = wasm.getPageInfo(i);
-    const canvas = renderPageCanvas(wasm, i);
-    pages.push({
-      dataUrl: canvas.toDataURL('image/png'),
-      widthMm: pxToMm(info.width),
-      heightMm: pxToMm(info.height),
-    });
+  if (pdfBlob) {
+    return savePdfBlob(pdfBlob, ensurePdfExtension(fileName));
   }
 
   const html = buildPrintHtml(pages);
