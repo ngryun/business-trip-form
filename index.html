@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>여비정산신청서 작성</title>
   <link rel="stylesheet" href="/src/styles.css" />
 </head>
@@ -102,6 +102,7 @@
             <legend>기타</legend>
             <label>제출 날짜 <input name="제출날짜" type="date" required /></label>
             <label>첨부서류 (텍스트)
+              <span id="attachment-presets" class="attachment-presets" aria-label="자주 쓰는 첨부서류"></span>
               <textarea name="첨부서류" rows="3" placeholder="예: 주유영수증 1매, 하이패스영수증 1매"></textarea>
             </label>
           </fieldset>
@@ -121,6 +122,12 @@
         <div id="scroll-container">
           <div id="scroll-content"></div>
         </div>
+        <!-- 모바일 전용 하단 툴바 — 폼을 열지 않고도 주요 작업을 한 번에 -->
+        <nav class="mobile-toolbar" aria-label="빠른 작업">
+          <button type="button" id="btn-mobile-edit">✏️ 입력하기</button>
+          <button type="button" id="btn-mobile-hwp">HWP 저장</button>
+          <button type="button" id="btn-mobile-pdf">PDF / 인쇄</button>
+        </nav>
       </section>
     </div>
 

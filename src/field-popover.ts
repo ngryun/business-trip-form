@@ -12,9 +12,12 @@ import {
   getDateTimePickerValue,
 } from './datetime-picker';
 import {
+  ATTACHMENT_PRESETS,
   FIELD_CONFIGS,
   formatDateKR,
   formatDateTimeCompactKR,
+  hasListItem,
+  toggleListItem,
   type WidgetConfig,
 } from './field-config';
 
@@ -93,6 +96,11 @@ export function showFieldPopover(args: PopoverArgs): void {
     finish('confirm');
   });
   if (recentChips) root.appendChild(recentChips);
+
+  // 첨부서류 자주 쓰는 항목 — 토글로 조합한 뒤 확인으로 반영 (최근 칩과 달리 즉시 확정하지 않음)
+  if (args.label === '첨부서류' && input instanceof HTMLTextAreaElement) {
+    root.appendChild(buildAttachmentPresetRow(input));
+  }
 
   root.appendChild(input);
 
@@ -473,6 +481,40 @@ export function closeFieldPopover(): void {
 
 export function isPopoverOpen(): boolean {
   return currentPopover !== null;
+}
+
+/** 첨부서류 자주 쓰는 항목 토글 칩 줄 — textarea 값의 쉼표 목록에 추가/제거한다. */
+function buildAttachmentPresetRow(textarea: HTMLTextAreaElement): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'field-popover__recent attachment-presets';
+  const heading = document.createElement('span');
+  heading.className = 'field-popover__recent-label';
+  heading.textContent = '자주 씀';
+  wrap.appendChild(heading);
+
+  const chips = ATTACHMENT_PRESETS.map((preset) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'attachment-preset-chip';
+    chip.textContent = preset;
+    chip.addEventListener('click', (e) => {
+      e.preventDefault();
+      textarea.value = toggleListItem(textarea.value, preset);
+      sync();
+      textarea.focus();
+    });
+    wrap.appendChild(chip);
+    return { chip, preset };
+  });
+
+  const sync = (): void => {
+    for (const { chip, preset } of chips) {
+      chip.classList.toggle('is-active', hasListItem(textarea.value, preset));
+    }
+  };
+  textarea.addEventListener('input', sync);
+  sync();
+  return wrap;
 }
 
 function buildRecentChips(

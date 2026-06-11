@@ -207,7 +207,11 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
     if (!rect) return null;
     const point = toPagePoint(e);
     if (!point || point.pageIdx !== rect.pageIndex) return null;
-    const pad = 6;
+    // 터치 기기는 손가락 기준 ~14 CSS px 여유를 준다. pad 는 페이지 좌표라 현재 줌으로 환산
+    // — 모바일 폭 맞춤 줌(~0.5)에서는 페이지 좌표 기준 여유가 두 배쯤 필요하다.
+    const padCss = window.matchMedia('(pointer: coarse)').matches ? 14 : 6;
+    const zoom = canvasView.getViewportManager().getZoom() || 1;
+    const pad = padCss / zoom;
     if (point.pageX < rect.x - pad || point.pageX > rect.x + rect.width + pad) return null;
     if (point.pageY < rect.y - pad || point.pageY > rect.y + rect.height + pad) return null;
     return rect;

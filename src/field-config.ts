@@ -12,6 +12,8 @@ export type WidgetConfig =
   | { type: 'select'; options: string[] };
 
 const TRANSPORT_OPTIONS = ['자가용', '버스', '기차/KTX', '항공', '지하철', '택시'];
+/** 첨부서류에 자주 쓰는 항목 — 입력창 위 토글 버튼으로 노출 */
+export const ATTACHMENT_PRESETS = ['주유영수증 1매', '하이패스영수증 1매'];
 export const DATETIME_MINUTE_STEP = 10;
 export const DATETIME_STEP_SECONDS = DATETIME_MINUTE_STEP * 60;
 export const DATETIME_HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => pad2(i));
@@ -37,6 +39,20 @@ export const FIELD_CONFIGS: Record<string, WidgetConfig> = {
   제출날짜: { type: 'date' },
   첨부서류: { type: 'textarea', rows: 2 },
 };
+
+/** 쉼표 구분 목록 문자열에서 항목을 토글한다 — 있으면 제거, 없으면 끝에 추가. */
+export function toggleListItem(value: string, item: string): string {
+  const parts = value.split(',').map((s) => s.trim()).filter(Boolean);
+  const idx = parts.indexOf(item);
+  if (idx >= 0) parts.splice(idx, 1);
+  else parts.push(item);
+  return parts.join(', ');
+}
+
+/** 쉼표 구분 목록 문자열에 항목이 들어 있는지 */
+export function hasListItem(value: string, item: string): boolean {
+  return value.split(',').some((s) => s.trim() === item);
+}
 
 /** datetime-local 입력값을 가장 가까운 10분 단위로 정규화 */
 export function normalizeDateTimeLocalStep(value: string): string {

@@ -13,6 +13,8 @@ html, body {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  /* iOS Safari 주소창 영역으로 하단이 가려지는 것 방지 (지원 브라우저에서 100vh 를 덮어씀) */
+  height: 100dvh;
 }
 
 .app-header {
@@ -209,6 +211,41 @@ html, body {
   font-size: 12px;
   color: #6b7280;
   margin-bottom: 8px;
+}
+
+/* 첨부서류 자주 쓰는 항목 토글 칩 — 폼/팝오버 공용 */
+.attachment-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.attachment-preset-chip {
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  color: #1f2937;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.attachment-preset-chip:hover,
+.attachment-preset-chip:focus {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  outline: none;
+}
+.attachment-preset-chip.is-active {
+  background: #2563eb;
+  border-color: #1d4ed8;
+  color: #ffffff;
+}
+.attachment-preset-chip.is-active::before {
+  content: "✓ ";
 }
 .form-pane input,
 .form-pane select,
@@ -477,6 +514,9 @@ html, body {
 /* 모바일 전용 — 폼을 닫고 미리보기를 확인 */
 .mobile-only { display: none; }
 
+/* 모바일 하단 툴바 — 데스크톱에서는 숨김 */
+.mobile-toolbar { display: none; }
+
 /* 도장 이미지 생성 다이얼로그 */
 .signature-control__make {
   display: block;
@@ -662,6 +702,60 @@ html, body {
   .datetime-time__select {
     font-size: 16px;
   }
+
+  /* 헤더 압축 — 부제목을 숨겨 작은 화면의 세로 공간을 확보 */
+  .app-header { padding: 8px 12px; }
+  .app-header .subtitle { display: none; }
+  .panel-toggle { width: 40px; height: 40px; }
+
+  /* 푸터는 한 줄로 — 줄바꿈으로 두 줄을 차지하지 않게 */
+  .app-footer {
+    flex-wrap: nowrap;
+    overflow: hidden;
+    white-space: nowrap;
+    padding-bottom: max(4px, env(safe-area-inset-bottom));
+  }
+  .app-footer span { overflow: hidden; text-overflow: ellipsis; }
+
+  /* 하단 고정 툴바 — 폼을 열지 않고 입력/저장을 바로 */
+  .mobile-toolbar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40; /* 폼 슬라이드오버(z 50)가 열리면 자연스럽게 가려진다 */
+    display: grid;
+    grid-template-columns: 1.25fr 1fr 1fr;
+    gap: 8px;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    background: rgba(249, 250, 251, 0.96);
+    border-top: 1px solid #e5e7eb;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+  .mobile-toolbar button {
+    min-height: 44px;
+    padding: 8px 6px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #1f2937;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #btn-mobile-edit { background: #2563eb; color: #ffffff; border-color: #1d4ed8; }
+  #btn-mobile-hwp { background: #059669; color: #ffffff; border-color: #047857; }
+  /* 마지막 페이지 하단이 툴바에 가리지 않도록 스크롤 여유 추가 */
+  #scroll-container { padding-bottom: 84px; }
+  /* 토스트가 툴바에 가리지 않게 위로 */
+  .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
+
+  .actions button { padding: 12px; font-size: 15px; }
 }
 
 /* 인라인 편집 팝오버 */
@@ -989,10 +1083,18 @@ html, body {
   #scroll-container { overflow: visible; height: auto; }
 }
 
+/* 터치 타깃 확대 — 팝오버 기본 규칙보다 뒤에 둬야 같은 특이도에서 이긴다 */
+@media (max-width: 800px) {
+  .field-popover__buttons button { padding: 10px 16px; font-size: 14px; }
+  .field-popover__recent-chip { padding: 6px 12px; font-size: 13px; }
+  .field-popover__select-option { min-height: 44px; }
+  .field-popover__stamp-action { padding: 12px 12px; font-size: 14px; }
+  .field-popover__tab { padding: 10px 8px; font-size: 13px; }
+}
+
 @media (max-width: 560px) {
   .app-footer {
     justify-content: flex-start;
-    flex-wrap: wrap;
     gap: 2px 8px;
   }
   .datetime-picker__panel {

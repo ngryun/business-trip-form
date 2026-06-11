@@ -18,11 +18,14 @@ import {
   readUrlFormValues,
 } from './url-share';
 import {
+  ATTACHMENT_PRESETS,
   FIELD_CONFIGS,
   formatDateKR,
   formatDateTimeRange,
+  hasListItem,
   parseDateKR,
   parseDateTimeRange,
+  toggleListItem,
 } from './field-config';
 
 /**
@@ -141,6 +144,43 @@ function collectFormValues(): Record<string, string> {
 function setupLocalFormPersistence(): void {
   formEl.addEventListener('input', saveFormState);
   formEl.addEventListener('change', saveFormState);
+}
+
+/** 첨부서류 입력 동기화용 — 인라인 편집 등으로 값이 바뀌었을 때 칩 활성 상태를 맞춘다. */
+let syncAttachmentPresetChips: (() => void) | null = null;
+
+/**
+ * 첨부서류 입력창 위의 "자주 쓰는 항목" 토글 칩.
+ * 누르면 쉼표 목록에 추가, 다시 누르면 제거 — 들어있는 동안은 파랗게 표시된다.
+ */
+function setupAttachmentPresets(): void {
+  const wrap = document.getElementById('attachment-presets');
+  const textarea = formEl.elements.namedItem('첨부서류');
+  if (!wrap || !(textarea instanceof HTMLTextAreaElement)) return;
+
+  const chips = ATTACHMENT_PRESETS.map((preset) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'attachment-preset-chip';
+    btn.textContent = preset;
+    btn.addEventListener('click', () => {
+      textarea.value = toggleListItem(textarea.value, preset);
+      // input 이벤트로 미리보기 반영 + 임시저장까지 한 번에 태운다
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      sync();
+    });
+    wrap.appendChild(btn);
+    return { btn, preset };
+  });
+
+  const sync = (): void => {
+    for (const { btn, preset } of chips) {
+      btn.classList.toggle('is-active', hasListItem(textarea.value, preset));
+    }
+  };
+  textarea.addEventListener('input', sync);
+  syncAttachmentPresetChips = sync;
+  sync();
 }
 
 function setupApplicantInfoStorage(): void {
@@ -420,6 +460,7 @@ function syncFormFromInline(label: string, hwpValue: string): void {
   if (!input) return;
   if (cfg.type === 'date') setFormControlValue(input, parseDateKR(hwpValue));
   else setFormControlValue(input, hwpValue);
+  if (label === '첨부서류') syncAttachmentPresetChips?.();
 }
 
 function setFormControlValue(
@@ -623,6 +664,7 @@ async function initialize(): Promise<void> {
   setDefaultSubmitDate();
   setupDateTimeControls();
   setupReturnLocationDefaults();
+  setupAttachmentPresets();
   setupLocalFormPersistence();
   setupApplicantInfoStorage();
   await preloadFonts();
@@ -952,6 +994,31 @@ async function initialize(): Promise<void> {
     pushRecentValuesFromForm();
     appBodyEl.classList.add('panel-collapsed');
     toggleBtn.setAttribute('aria-expanded', 'false');
+  });
+
+  // 모바일 하단 툴바 — 폼을 열지 않고도 입력/저장을 바로 시작
+  document.getElementById('btn-mobile-edit')?.addEventListener('click', () => {
+    appBodyEl.classList.remove('panel-collapsed');
+    toggleBtn.setAttribute('aria-expanded', 'true');
+  });
+  document.getElementById('btn-mobile-hwp')?.addEventListener('click', () => {
+    document.getElementById('btn-download-hwp')?.click();
+  });
+  document.getElementById('btn-mobile-pdf')?.addEventListener('click', () => {
+    document.getElementById('btn-print')?.click();
+  });
+
+  // 화면 회전/창 크기 변경 시 모바일 폭 맞춤 줌을 다시 적용한다.
+  // 높이만 변하는 경우(iOS 키보드 노출 등)는 건너뛴다 — 재계산이 스크롤 위치를 초기화하기 때문.
+  let lastViewportWidth = window.innerWidth;
+  let viewportResizeTimer = 0;
+  window.addEventListener('resize', () => {
+    if (window.innerWidth === lastViewportWidth) return;
+    lastViewportWidth = window.innerWidth;
+    window.clearTimeout(viewportResizeTimer);
+    viewportResizeTimer = window.setTimeout(() => {
+      if (window.innerWidth < 1024) canvasView.loadDocument();
+    }, 200);
   });
 
   document.getElementById('btn-download-hwp')!.addEventListener('click', async () => {
