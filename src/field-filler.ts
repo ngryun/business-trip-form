@@ -155,7 +155,7 @@ export function setFieldValues(
 ): { applied: number; missing: string[] } {
   let applied = 0;
   const missing: string[] = [];
-  const filledFieldIds = new Set<number>();
+  const filledFieldIds = new Map<number, string>();
   for (const [label, value] of Object.entries(values)) {
     const text = value ?? '';
     if (!text && !options.clearEmpty) continue;
@@ -168,7 +168,7 @@ export function setFieldValues(
       const res = wasm.setFieldValue(t.fieldId, text);
       if (res.ok) {
         applied += 1;
-        if (text) filledFieldIds.add(t.fieldId);
+        if (text) filledFieldIds.set(t.fieldId, t.name || t.guide || label);
       }
     }
   }
@@ -200,7 +200,7 @@ export function fillDateTimeRange(
     }
     for (const t of endTargets) {
       try { wasm.setFieldValue(t.fieldId, ''); } catch { /* noop */ }
-      clearFieldGuide(wasm, t.fieldId);
+      clearFieldGuide(wasm, t.fieldId, t.name || t.guide || '종료일시');
     }
     restoreEmptyFieldGuides(wasm, fields);
     return;
@@ -209,14 +209,14 @@ export function fillDateTimeRange(
   // 보이지 않는 끝 공백을 하나 붙여 마지막 실제 글자가 필드 경계에 닿지 않게 한다.
   const previewSafeRangeText = `${rangeText} `;
 
-  const filled = new Set<number>();
+  const filled = new Map<number, string>();
   for (const t of startTargets) {
     const res = wasm.setFieldValue(t.fieldId, previewSafeRangeText);
-    if (res.ok) filled.add(t.fieldId);
+    if (res.ok) filled.set(t.fieldId, t.name || t.guide || '시작일시');
   }
   for (const t of endTargets) {
     try { wasm.setFieldValue(t.fieldId, ''); } catch { /* noop */ }
-    clearFieldGuide(wasm, t.fieldId);
+    clearFieldGuide(wasm, t.fieldId, t.name || t.guide || '종료일시');
   }
   // 시작일시 누름틀 글자색을 검정으로 (안내문 빨강 잔존 방지) + 안내문구 제거
   forceBlackOnFields(wasm, filled);
@@ -229,20 +229,21 @@ export function fillDateTimeRange(
  * 출력물에도 빨간 안내문이 그대로 찍힌다. 반환된 함수를 호출하면 원래 안내문구로 복원된다.
  */
 export function suppressEmptyFieldGuides(wasm: WasmBridge): () => void {
-  const saved: Array<{ fieldId: number; guide: string }> = [];
+  const saved: Array<{ fieldId: number; guide: string; name: string }> = [];
   for (const f of wasm.getFieldList()) {
     if ((f.value ?? '').trim() !== '') continue;
     try {
       const props = (wasm as any).getClickHereProps?.(f.fieldId);
       if (!props?.ok || !props.guide) continue;
+      const name = props.name || f.name || '';
       (wasm as any).updateClickHereProps?.(
         f.fieldId,
         '',
         props.memo ?? '',
-        props.name ?? '',
+        name,
         props.editable ?? true,
       );
-      saved.push({ fieldId: f.fieldId, guide: props.guide });
+      saved.push({ fieldId: f.fieldId, guide: props.guide, name });
     } catch {
       // 개별 필드 실패는 출력 자체를 막지 않는다.
     }
@@ -251,7 +252,7 @@ export function suppressEmptyFieldGuides(wasm: WasmBridge): () => void {
 
   return () => {
     if (saved.length === 0) return;
-    for (const { fieldId, guide } of saved) {
+    for (const { fieldId, guide, name } of saved) {
       try {
         const props = (wasm as any).getClickHereProps?.(fieldId);
         if (!props?.ok) continue;
@@ -259,7 +260,7 @@ export function suppressEmptyFieldGuides(wasm: WasmBridge): () => void {
           fieldId,
           guide,
           props.memo ?? '',
-          props.name ?? '',
+          props.name || name,
           props.editable ?? true,
         );
       } catch {
@@ -271,7 +272,7 @@ export function suppressEmptyFieldGuides(wasm: WasmBridge): () => void {
 }
 
 /** 누름틀 안내문구(guide)를 비워 화면에 placeholder 가 남지 않게 한다 (name 은 유지해 재탐색 가능). */
-function clearFieldGuide(wasm: WasmBridge, fieldId: number): void {
+function clearFieldGuide(wasm: WasmBridge, fieldId: number, fallbackName = ''): void {
   try {
     const props = (wasm as any).getClickHereProps?.(fieldId);
     if (!props?.ok) return;
@@ -279,7 +280,7 @@ function clearFieldGuide(wasm: WasmBridge, fieldId: number): void {
       fieldId,
       '',
       props.memo ?? '',
-      props.name ?? '',
+      props.name || fallbackName,
       props.editable ?? true,
     );
   } catch {
@@ -302,7 +303,7 @@ function restoreEmptyFieldGuides(wasm: WasmBridge, fields: FieldMap): void {
       try {
         const props = (wasm as any).getClickHereProps?.(entry.fieldId);
         if (!props?.ok || props.guide) continue;
-        const name = props.name ?? latest?.name ?? entry.name ?? '';
+        const name = props.name || latest?.name || entry.name || '';
         const guide = entry.guide || name || label;
         if (!guide) continue;
         (wasm as any).updateClickHereProps?.(
@@ -326,8 +327,8 @@ function restoreEmptyFieldGuides(wasm: WasmBridge, fields: FieldMap): void {
  * - 각 필드의 startCharIdx/endCharIdx 는 getFieldInfoAt 으로 재조회
  * - 본문/단일 셀/중첩 셀 모두 처리 (path 깊이에 따라 분기)
  */
-function forceBlackOnFields(wasm: WasmBridge, fieldIds: Set<number>): void {
-  if (fieldIds.size === 0) return;
+function forceBlackOnFields(wasm: WasmBridge, fieldNamesById: Map<number, string>): void {
+  if (fieldNamesById.size === 0) return;
   const propsJson = JSON.stringify({
     fontId: wasm.findOrCreateFontId('맑은 고딕'),
     italic: false,
@@ -335,9 +336,9 @@ function forceBlackOnFields(wasm: WasmBridge, fieldIds: Set<number>): void {
   });
   const list = wasm.getFieldList();
   for (const f of list) {
-    if (!fieldIds.has(f.fieldId)) continue;
+    if (!fieldNamesById.has(f.fieldId)) continue;
     try {
-      applyBlackToField(wasm, f, propsJson);
+      applyBlackToField(wasm, f, propsJson, fieldNamesById.get(f.fieldId) ?? '');
     } catch (err) {
       console.warn(`[field-filler] 입력값 서식 적용 실패 (fieldId=${f.fieldId}, name=${f.name}):`, err);
     }
@@ -356,7 +357,7 @@ interface FieldListEntry {
   };
 }
 
-function applyBlackToField(wasm: WasmBridge, f: FieldListEntry, propsJson: string): void {
+function applyBlackToField(wasm: WasmBridge, f: FieldListEntry, propsJson: string, fallbackName: string): void {
   const loc = f.location;
   const sec = loc.sectionIndex;
   const path = loc.path ?? [];
@@ -388,7 +389,7 @@ function applyBlackToField(wasm: WasmBridge, f: FieldListEntry, propsJson: strin
         f.fieldId,
         '', // guide 비움
         props.memo ?? '',
-        props.name ?? '',
+        props.name || f.name || fallbackName,
         props.editable ?? true,
       );
     }

@@ -743,8 +743,7 @@ async function initialize(): Promise<void> {
       clearEmpty: options.clearEmpty,
     });
     fillDateTimeRange(wasm, fields, rangeText, { clearEmpty: options.clearEmpty });
-    realignSignatureStamp();
-    refreshPreview(wasm);
+    refreshPreviewAndRealignSignatureStamp();
     fields = discoverFields(wasm);
     if (!statusMessage) return;
     const warn = missing.length > 0 ? ` (양식에 없는 라벨: ${missing.join(', ')})` : '';
@@ -776,7 +775,7 @@ async function initialize(): Promise<void> {
   if (storedSignatureStamp) {
     try {
       signatureStamp.applyStored(storedSignatureStamp);
-      refreshPreview(wasm);
+      refreshPreviewAndRealignSignatureStamp();
       updateSignatureButtons();
       setStatus('브라우저에 저장된 도장/서명 이미지를 복원했습니다.');
     } catch (err) {
@@ -844,10 +843,7 @@ async function initialize(): Promise<void> {
       if (applyReturnLocationDefault(label)) {
         applyReturnLocationsToPreview();
       }
-      if (label === '성명' || label === '이름') {
-        realignSignatureStamp();
-      }
-      refreshPreview(wasm);
+      refreshPreviewAndRealignSignatureStamp();
       fields = discoverFields(wasm);
       saveFormState();
       setStatus(`"${label}" 항목을 반영했습니다.`);
@@ -858,7 +854,7 @@ async function initialize(): Promise<void> {
   async function applySignatureFile(file: File, successMessage: string): Promise<void> {
     try {
       await signatureStamp.applyFile(file);
-      refreshPreview(wasm);
+      refreshPreviewAndRealignSignatureStamp();
       updateSignatureButtons();
       setStatus(successMessage);
     } catch (err) {
@@ -893,7 +889,7 @@ async function initialize(): Promise<void> {
       setStatus('도장 회전에 실패했습니다.', true);
       return false;
     }
-    refreshPreview(wasm);
+    refreshPreviewAndRealignSignatureStamp();
     updateSignatureButtons();
     setStatus(deg === 0
       ? '도장 회전을 원래대로(0°) 되돌렸습니다.'
@@ -947,12 +943,20 @@ async function initialize(): Promise<void> {
     setStatus('브라우저에 저장된 도장/서명 이미지를 삭제했습니다.');
   });
 
-  function realignSignatureStamp(): void {
-    if (!signatureStamp.hasStamp()) return;
+  function refreshPreviewAndRealignSignatureStamp(): void {
+    refreshPreview(wasm);
+    if (realignSignatureStamp()) {
+      canvasView.loadDocument();
+    }
+  }
+
+  function realignSignatureStamp(): boolean {
+    if (!signatureStamp.hasStamp()) return false;
     try {
-      signatureStamp.realign();
+      return signatureStamp.realign();
     } catch (err) {
       console.warn('[web-form] 도장/서명 위치 재정렬 실패:', err);
+      return false;
     }
   }
 
