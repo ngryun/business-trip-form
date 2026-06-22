@@ -185,21 +185,48 @@ export function showFieldPopover(args: PopoverArgs): void {
   currentPopover = root;
 }
 
-export function showDateTimeRangePopover(args: DateTimeRangePopoverArgs): void {
-  closeFieldPopover();
+export interface RangeChromeHandle {
+  root: HTMLElement;
+  startPicker: HTMLElement;
+  endPicker: HTMLElement;
+  /** 라벨/경고/판 표시를 현재 picker 값 기준으로 다시 계산 (외부에서 값을 바꾼 뒤 호출) */
+  refresh: () => void;
+  /** 시작 picker 값이 바뀐 직후 호출: 비어 있는 종료를 같은 날 18:00 으로 제안 + 갱신 */
+  handleStartChange: () => void;
+  setActiveTab: (tab: 'start' | 'end') => void;
+  values: () => { start: string; end: string };
+}
+
+interface RangeChromeArgs {
+  startPicker: HTMLElement;
+  endPicker: HTMLElement;
+  initialTab?: 'start' | 'end';
+  withTitle?: boolean;
+  /** 프리셋·자동제안 등 chrome 내부에서 값을 바꾼 직후 호출 (호스트의 추가 동기화용) */
+  onChange?: () => void;
+}
+
+/**
+ * 시작/종료 일시 입력의 공통 UI(탭·빠른선택·달력·경고)를 만든다.
+ * 미리보기 팝오버와 사이드바 inline 입력이 같은 동작을 쓰도록 한 곳에 모았다.
+ * picker 두 개는 호출자가 만들어 넘긴다 — 팝오버는 익명 picker, 사이드바는 폼의 named hidden 에 묶인 picker.
+ * 탭을 오가도 두 피커의 입력 상태는 유지되고, 비활성 탭의 달력만 숨긴다.
+ */
+export function buildDateTimeRangeChrome(args: RangeChromeArgs): RangeChromeHandle {
+  const { startPicker, endPicker } = args;
+  let activeTab: 'start' | 'end' = args.initialTab ?? 'start';
 
   const root = document.createElement('div');
-  root.className = 'field-popover field-popover--range';
-  root.setAttribute('role', 'dialog');
-  root.setAttribute('aria-label', '출장 일시 입력');
+  root.className = 'field-popover__range-chrome';
 
-  const titleEl = document.createElement('div');
-  titleEl.className = 'field-popover__title';
-  titleEl.textContent = '출장 일시';
-  root.appendChild(titleEl);
+  if (args.withTitle) {
+    const titleEl = document.createElement('div');
+    titleEl.className = 'field-popover__title';
+    titleEl.textContent = '출장 일시';
+    root.appendChild(titleEl);
+  }
 
   // 시작/종료 탭 — 탭 라벨이 현재 값 요약을 겸한다
-  let activeTab: 'start' | 'end' = args.initialTab ?? 'start';
   const tabs = document.createElement('div');
   tabs.className = 'field-popover__tabs';
   tabs.setAttribute('role', 'tablist');
@@ -217,19 +244,8 @@ export function showDateTimeRangePopover(args: DateTimeRangePopoverArgs): void {
   presets.appendChild(presetsLabel);
   root.appendChild(presets);
 
-  // 두 피커를 모두 만들어 두고 표시만 전환 — 탭을 오가도 입력 상태가 유지된다
   const range = document.createElement('div');
   range.className = 'field-popover__range';
-  const startPicker = createDateTimePicker(args.startValue, {
-    defaultHour: '09',
-    inline: true,
-    onChange: handleStartChange,
-  });
-  const endPicker = createDateTimePicker(args.endValue, {
-    defaultHour: '18',
-    inline: true,
-    onChange: updateRangeMeta,
-  });
   const startPane = createRangeTabPane(startPicker);
   const endPane = createRangeTabPane(endPicker);
   range.append(startPane, endPane);
@@ -241,23 +257,15 @@ export function showDateTimeRangePopover(args: DateTimeRangePopoverArgs): void {
   warnEl.hidden = true;
   root.appendChild(warnEl);
 
-  function rangeValues(): { start: string; end: string } {
+  function values(): { start: string; end: string } {
     return {
       start: getDateTimePickerValue(startPicker),
       end: getDateTimePickerValue(endPicker),
     };
   }
 
-  /** 시작을 고르면 비어 있는 종료를 같은 날 18:00 으로 제안한다 (탭에서 바로 수정 가능). */
-  function handleStartChange(value: string): void {
-    if (value && !getDateTimePickerValue(endPicker)) {
-      getDateTimePickerController(endPicker)?.setValue(`${value.slice(0, 10)}T18:00`);
-    }
-    updateRangeMeta();
-  }
-
-  function updateRangeMeta(): void {
-    const { start, end } = rangeValues();
+  function refresh(): void {
+    const { start, end } = values();
     startTabBtn.textContent = start ? `시작 · ${formatDateTimeCompactKR(start)}` : '시작 일시';
     endTabBtn.textContent = end ? `종료 · ${formatDateTimeCompactKR(end)}` : '종료 일시';
     startTabBtn.classList.toggle('is-active', activeTab === 'start');
@@ -271,7 +279,17 @@ export function showDateTimeRangePopover(args: DateTimeRangePopoverArgs): void {
 
   function setActiveTab(tab: 'start' | 'end'): void {
     activeTab = tab;
-    updateRangeMeta();
+    refresh();
+  }
+
+  /** 시작을 고르면 비어 있는 종료를 같은 날 18:00 으로 제안한다 (탭에서 바로 수정 가능). */
+  function handleStartChange(): void {
+    const start = getDateTimePickerValue(startPicker);
+    if (start && !getDateTimePickerValue(endPicker)) {
+      getDateTimePickerController(endPicker)?.setValue(`${start.slice(0, 10)}T18:00`);
+    }
+    refresh();
+    args.onChange?.();
   }
 
   startTabBtn.addEventListener('click', () => setActiveTab('start'));
@@ -288,10 +306,43 @@ export function showDateTimeRangePopover(args: DateTimeRangePopoverArgs): void {
       const endDate = preset.nextDay ? addDaysToDateValue(date, 1) : date;
       getDateTimePickerController(startPicker)?.setValue(`${date}T${preset.startTime}`);
       getDateTimePickerController(endPicker)?.setValue(`${endDate}T${preset.endTime}`);
-      updateRangeMeta();
+      refresh();
+      args.onChange?.();
     });
     presets.appendChild(chip);
   }
+
+  refresh();
+  return { root, startPicker, endPicker, refresh, handleStartChange, setActiveTab, values };
+}
+
+export function showDateTimeRangePopover(args: DateTimeRangePopoverArgs): void {
+  closeFieldPopover();
+
+  const root = document.createElement('div');
+  root.className = 'field-popover field-popover--range';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-label', '출장 일시 입력');
+
+  // chrome 의 onChange 콜백이 아래 picker 들을 참조하므로 forward 선언으로 묶는다 (실제 호출은 사용자 조작 이후).
+  let chrome: RangeChromeHandle;
+  const startPicker = createDateTimePicker(args.startValue, {
+    defaultHour: '09',
+    inline: true,
+    onChange: () => chrome.handleStartChange(),
+  });
+  const endPicker = createDateTimePicker(args.endValue, {
+    defaultHour: '18',
+    inline: true,
+    onChange: () => chrome.refresh(),
+  });
+  chrome = buildDateTimeRangeChrome({
+    startPicker,
+    endPicker,
+    initialTab: args.initialTab,
+    withTitle: true,
+  });
+  root.appendChild(chrome.root);
 
   const buttons = document.createElement('div');
   buttons.className = 'field-popover__buttons';
@@ -311,7 +362,6 @@ export function showDateTimeRangePopover(args: DateTimeRangePopoverArgs): void {
   else buttons.append(cancelBtn, confirmBtn);
   root.appendChild(buttons);
 
-  updateRangeMeta();
   document.body.appendChild(root);
   positionNear(root, args.anchor);
 
@@ -322,7 +372,7 @@ export function showDateTimeRangePopover(args: DateTimeRangePopoverArgs): void {
       return;
     }
 
-    const { start: startValue, end: endValue } = rangeValues();
+    const { start: startValue, end: endValue } = chrome.values();
     if (action === 'next' && args.onNext) {
       closeFieldPopover();
       args.onNext(startValue, endValue);
@@ -356,7 +406,7 @@ export function showDateTimeRangePopover(args: DateTimeRangePopoverArgs): void {
   setTimeout(() => document.addEventListener('mousedown', onOuter, { capture: true }), 0);
   currentCleanup = () => document.removeEventListener('mousedown', onOuter, { capture: true } as any);
 
-  setTimeout(() => focusInput(activeTab === 'end' ? endPicker : startPicker), 0);
+  setTimeout(() => focusInput(args.initialTab === 'end' ? endPicker : startPicker), 0);
   currentPopover = root;
 }
 

@@ -998,6 +998,19 @@ html, body {
 .field-popover__range .datetime-calendar__weekdays span {
   height: 16px;
 }
+/* 사이드바 출장 일시 묶음 — 미리보기 팝오버와 같은 range UI(buildDateTimeRangeChrome)를 inline 으로 품는다. */
+.field-label {
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 6px;
+}
+.datetime-range {
+  margin-bottom: 8px;
+  min-width: 0;
+}
+.field-popover__range-chrome {
+  min-width: 0;
+}
 .field-popover__buttons {
   display: flex;
   gap: 6px;

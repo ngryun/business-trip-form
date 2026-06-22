@@ -56,16 +56,15 @@
 
           <fieldset>
             <legend>출장 일시 / 장소</legend>
-            <label>시작 일시
-              <span class="datetime-picker" data-datetime-picker="시작일시" data-datetime-placeholder="시작 일시 선택" data-datetime-default-hour="09">
+            <div class="field-label">출장 일시</div>
+            <div class="datetime-range" id="datetime-range">
+              <span class="datetime-picker" data-datetime-picker="시작일시" data-datetime-default-hour="09">
                 <input name="시작일시" type="hidden" />
               </span>
-            </label>
-            <label>종료 일시
-              <span class="datetime-picker" data-datetime-picker="종료일시" data-datetime-placeholder="종료 일시 선택" data-datetime-default-hour="18">
+              <span class="datetime-picker" data-datetime-picker="종료일시" data-datetime-default-hour="18">
                 <input name="종료일시" type="hidden" />
               </span>
-            </label>
+            </div>
             <label>출장지 <input name="출장지" type="text" required /></label>
           </fieldset>
 

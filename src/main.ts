@@ -4,7 +4,7 @@ import { downloadHwp } from './download';
 import { mountPreview, refreshPreview, setPreviewReloadHook } from './preview';
 import { registerFontFaces, preloadFonts } from './fonts';
 import { attachInlineEditing } from './field-interaction';
-import { showStampPopover } from './field-popover';
+import { buildDateTimeRangeChrome, showStampPopover, type RangeChromeHandle } from './field-popover';
 import { setupDateTimePicker, type DateTimePickerController } from './datetime-picker';
 import { SignatureStampManager, type StoredSignatureStamp } from './signature-stamp';
 import { openStampGenerator } from './stamp-generator';
@@ -75,6 +75,8 @@ const RETURN_LOCATION_DEFAULTS: Record<string, string> = {
   갈때도착지: '올때출발지',
 };
 const dateTimeControllers = new WeakMap<HTMLElement, DateTimePickerController>();
+/** 사이드바 출장 일시(시작/종료)를 한 묶음으로 감싸는 공통 UI — 미리보기 팝오버와 동작을 공유한다. */
+let dateTimeRangeChrome: RangeChromeHandle | null = null;
 const autoTravelDates = new Map<string, string>();
 const autoReturnLocations = new Map<string, string>();
 let liveDateTimePreviewHandler: (() => void) | null = null;
@@ -453,6 +455,7 @@ function syncFormFromInline(label: string, hwpValue: string): void {
     const { start, end } = parseDateTimeRange(hwpValue);
     setDateTimeControlValue('시작일시', start);
     setDateTimeControlValue('종료일시', end);
+    dateTimeRangeChrome?.refresh();
     return;
   }
   const inputName = label === '이름' ? '성명' : label;
@@ -531,21 +534,52 @@ function setupPanelToggle(): void {
 }
 
 function setupDateTimeControls(): void {
-  const controls = formEl.querySelectorAll<HTMLElement>('[data-datetime-picker]');
-  for (const control of controls) {
-    const controller = setupDateTimePicker(control, {
-      defaultHour: control.dataset.datetimeDefaultHour,
-      placeholder: control.dataset.datetimePlaceholder,
-      onChange: () => {
-        applyTravelDateDefault(control);
-        liveDateTimePreviewHandler?.();
-      },
-    });
-    if (controller) {
-      dateTimeControllers.set(control, controller);
-      applyTravelDateDefault(control);
-    }
+  const startControl = formEl.querySelector<HTMLElement>('[data-datetime-picker="시작일시"]');
+  const endControl = formEl.querySelector<HTMLElement>('[data-datetime-picker="종료일시"]');
+  if (!startControl || !endControl) return;
+
+  // 프리셋·자동제안처럼 chrome 내부에서 picker.setValue 로 값을 바꾼 경우 picker onChange 가 안 뜨므로,
+  // 그 직후 양쪽 출발/도착 기본일자 + 미리보기를 직접 동기화한다.
+  const syncSidebar = (): void => {
+    applyTravelDateDefault(startControl);
+    applyTravelDateDefault(endControl);
+    liveDateTimePreviewHandler?.();
+  };
+
+  const startController = setupDateTimePicker(startControl, {
+    defaultHour: startControl.dataset.datetimeDefaultHour,
+    inline: true,
+    onChange: () => {
+      applyTravelDateDefault(startControl);
+      liveDateTimePreviewHandler?.();
+      dateTimeRangeChrome?.handleStartChange();
+    },
+  });
+  const endController = setupDateTimePicker(endControl, {
+    defaultHour: endControl.dataset.datetimeDefaultHour,
+    inline: true,
+    onChange: () => {
+      applyTravelDateDefault(endControl);
+      liveDateTimePreviewHandler?.();
+      dateTimeRangeChrome?.refresh();
+    },
+  });
+  if (startController) {
+    dateTimeControllers.set(startControl, startController);
+    applyTravelDateDefault(startControl);
   }
+  if (endController) {
+    dateTimeControllers.set(endControl, endController);
+    applyTravelDateDefault(endControl);
+  }
+
+  // 두 picker 를 탭·빠른선택·경고로 감싼다 — buildDateTimeRangeChrome 가 picker 를 판 안으로 옮겨 담는다.
+  dateTimeRangeChrome = buildDateTimeRangeChrome({
+    startPicker: startControl,
+    endPicker: endControl,
+    onChange: syncSidebar,
+  });
+  document.getElementById('datetime-range')?.appendChild(dateTimeRangeChrome.root);
 }
 
 function setupReturnLocationDefaults(): void {
@@ -567,13 +601,6 @@ function syncAllDateTimeControlsToHidden(): void {
   }
 }
 
-function syncAllDateTimeControlsFromHidden(): void {
-  for (const control of formEl.querySelectorAll<HTMLElement>('[data-datetime-picker]')) {
-    const hidden = control.querySelector<HTMLInputElement>('input[type="hidden"]');
-    dateTimeControllers.get(control)?.setValue(hidden?.value ?? '');
-  }
-}
-
 /**
  * 모든 일시 picker 를 빈 값으로 강제 초기화한다.
  *
@@ -591,6 +618,7 @@ function resetAllDateTimeControls(): void {
     }
     dateTimeControllers.get(control)?.setValue('');
   }
+  dateTimeRangeChrome?.refresh();
 }
 
 function setDateTimeControlValue(name: string, value: string): void {
