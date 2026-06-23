@@ -56,6 +56,8 @@ export function openStampGenerator(opts: StampGeneratorOptions): void {
     { value: 'yang', label: '양각 (빨간 글자)' },
     { value: 'eum', label: '음각 (흰 글자)' },
   ], redraw);
+  // 거친 인주 질감 강도 — 0% 면 깔끔한 벡터, 높일수록 실제 날인처럼 갈라지고 번진다
+  const textureRow = createSliderRow('질감', 45, redraw);
 
   // 미리보기
   const previewWrap = document.createElement('div');
@@ -78,7 +80,7 @@ export function openStampGenerator(opts: StampGeneratorOptions): void {
   generateBtn.textContent = '문서에 넣기';
   buttons.append(cancelBtn, generateBtn);
 
-  dialog.append(title, nameLabel, suffixRow.root, styleRow.root, previewWrap, buttons);
+  dialog.append(title, nameLabel, suffixRow.root, styleRow.root, textureRow.root, previewWrap, buttons);
   backdrop.appendChild(dialog);
   document.body.appendChild(backdrop);
   currentDialog = backdrop;
@@ -95,7 +97,7 @@ export function openStampGenerator(opts: StampGeneratorOptions): void {
 
   function redraw(): void {
     const name = cleanName();
-    drawStamp(canvas, name, suffixRow.getValue(), styleRow.getValue() as 'yang' | 'eum');
+    drawStamp(canvas, name, suffixRow.getValue(), styleRow.getValue() as 'yang' | 'eum', textureRow.getValue());
     generateBtn.disabled = name.length === 0;
   }
 
@@ -183,6 +185,46 @@ function createRadioRow(
   };
 }
 
+interface SliderRowController {
+  root: HTMLElement;
+  /** 0~1 로 정규화한 현재 값 */
+  getValue: () => number;
+}
+
+/** 0~100% 슬라이더 한 줄 — 라벨 + 슬라이더 + 현재 % 표시. */
+function createSliderRow(label: string, initial: number, onChange: () => void): SliderRowController {
+  const root = document.createElement('div');
+  root.className = 'stamp-dialog__field stamp-dialog__slider';
+
+  const heading = document.createElement('span');
+  heading.className = 'stamp-dialog__slider-label';
+  heading.textContent = label;
+
+  const input = document.createElement('input');
+  input.type = 'range';
+  input.min = '0';
+  input.max = '100';
+  input.step = '5';
+  input.value = String(initial);
+  input.className = 'stamp-dialog__slider-input';
+  input.setAttribute('aria-label', `${label} 강도 (0~100%)`);
+
+  const valueEl = document.createElement('span');
+  valueEl.className = 'stamp-dialog__slider-value';
+  const syncValue = (): void => {
+    valueEl.textContent = `${input.value}%`;
+  };
+  syncValue();
+
+  input.addEventListener('input', () => {
+    syncValue();
+    onChange();
+  });
+
+  root.append(heading, input, valueEl);
+  return { root, getValue: () => Number(input.value) / 100 };
+}
+
 /** 글자 수에 따른 원 안 배치 — 중심 기준 픽셀 오프셋과 폰트 크기 */
 function layoutChars(count: number): { font: number; positions: Array<[number, number]> } {
   switch (count) {
@@ -209,31 +251,73 @@ function layoutChars(count: number): { font: number; positions: Array<[number, n
   }
 }
 
-function drawStamp(canvas: HTMLCanvasElement, name: string, suffix: string, style: 'yang' | 'eum'): void {
+const RING_WIDTH = 14;
+
+/**
+ * 도장을 그린다. texture(0~1) 가 0 보다 크면 실제 날인처럼 보이도록 거친 질감을 입힌다.
+ *
+ * 순서: ① 깨끗한 도장을 오프스크린 캔버스(잉크 레이어)에 그린다 → ② destination-out 으로
+ * 무작위 잡음을 덧칠해 잉크 일부를 "지워" 갈라짐/번짐을 만든다 → ③ 미세하게 회전시켜 본 캔버스에 합성.
+ * 잡음은 입력값(이름·끝글자·새김·강도)으로 시드한 PRNG 라, 같은 입력이면 같은 모양이 나와 미리보기가 떨리지 않는다.
+ */
+function drawStamp(
+  canvas: HTMLCanvasElement,
+  name: string,
+  suffix: string,
+  style: 'yang' | 'eum',
+  texture: number,
+): void {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const S = STAMP_SIZE;
   const center = S / 2;
   ctx.clearRect(0, 0, S, S);
 
-  const ringWidth = 14;
-  const radius = center - ringWidth / 2 - 4;
+  const chars = [...name];
+  if (suffix) chars.push(suffix);
+
+  const ink = document.createElement('canvas');
+  ink.width = S;
+  ink.height = S;
+  const ictx = ink.getContext('2d');
+  if (!ictx) return;
+
+  drawInkLayer(ictx, center, chars, style);
+
+  const rng = makeRng(`${name}|${suffix}|${style}|${Math.round(texture * 100)}`);
+  if (texture > 0) applyDistress(ictx, S, center, texture, rng);
+
+  // 손으로 찍은 듯한 미세 기울기 — 질감이 0 이면 회전도 없다
+  const rot = (rng() * 2 - 1) * 0.06 * texture;
+  ctx.save();
+  ctx.translate(center, center);
+  ctx.rotate(rot);
+  ctx.drawImage(ink, -center, -center);
+  ctx.restore();
+}
+
+/** 깨끗한 도장(테두리 + 글자)을 그린다 — 질감 처리 전 단계. */
+function drawInkLayer(
+  ctx: CanvasRenderingContext2D,
+  center: number,
+  chars: string[],
+  style: 'yang' | 'eum',
+): void {
+  const radius = center - RING_WIDTH / 2 - 4;
 
   if (style === 'eum') {
     ctx.fillStyle = STAMP_RED;
     ctx.beginPath();
-    ctx.arc(center, center, radius + ringWidth / 2, 0, Math.PI * 2);
+    ctx.arc(center, center, radius + RING_WIDTH / 2, 0, Math.PI * 2);
     ctx.fill();
   } else {
     ctx.strokeStyle = STAMP_RED;
-    ctx.lineWidth = ringWidth;
+    ctx.lineWidth = RING_WIDTH;
     ctx.beginPath();
     ctx.arc(center, center, radius, 0, Math.PI * 2);
     ctx.stroke();
   }
 
-  const chars = [...name];
-  if (suffix) chars.push(suffix);
   if (chars.length === 0) return;
 
   const { font, positions } = layoutChars(chars.length);
@@ -249,4 +333,79 @@ function drawStamp(canvas: HTMLCanvasElement, name: string, suffix: string, styl
     ctx.fillText(ch, center + dx, center + dy);
     ctx.strokeText(ch, center + dx, center + dy);
   });
+}
+
+/**
+ * 잉크 레이어에 거친 인주 질감을 입힌다 (destination-out 으로 잉크를 부분적으로 지운다).
+ * ① 전면 미세 갈라짐 ② 테두리 집중 침식(거친 원주) ③ 큰 농담 얼룩(압력 불균일).
+ * amount(0~1) 가 클수록 강하게 침식된다.
+ */
+function applyDistress(
+  ctx: CanvasRenderingContext2D,
+  S: number,
+  center: number,
+  amount: number,
+  rng: () => number,
+): void {
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.fillStyle = '#000';
+
+  // ① 전면에 흩뿌린 미세 갈라짐 — 잉크가 고르게 안 묻은 느낌
+  const speckles = Math.floor(S * S * 0.02 * amount);
+  for (let i = 0; i < speckles; i += 1) {
+    const x = rng() * S;
+    const y = rng() * S;
+    const r = 0.4 + rng() * (1.2 + amount * 1.6);
+    ctx.globalAlpha = 0.12 + rng() * 0.5;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // ② 테두리(원주) 집중 침식 — 매끈한 원이 끊기고 번진 거친 테두리가 된다
+  const edgeHits = Math.floor(160 * amount);
+  const radius = center - RING_WIDTH / 2 - 4;
+  for (let i = 0; i < edgeHits; i += 1) {
+    const a = rng() * Math.PI * 2;
+    const rr = radius + (rng() * 2 - 1) * (RING_WIDTH * 0.9);
+    const x = center + Math.cos(a) * rr;
+    const y = center + Math.sin(a) * rr;
+    const r = 1 + rng() * 4;
+    ctx.globalAlpha = 0.25 + rng() * 0.6;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // ③ 큰 농담 얼룩 — 손으로 누른 압력 차이로 한쪽이 연해지는 느낌
+  ctx.globalAlpha = 1;
+  const blobs = 1 + Math.floor(rng() * 2);
+  for (let i = 0; i < blobs; i += 1) {
+    const x = center + (rng() * 2 - 1) * center * 0.7;
+    const y = center + (rng() * 2 - 1) * center * 0.7;
+    const r = 30 + rng() * 70;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `rgba(0,0,0,${0.18 * amount})`);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, S, S);
+  }
+
+  ctx.restore();
+}
+
+/** 입력 문자열로 시드한 결정적 PRNG (mulberry32) — 같은 입력이면 같은 질감이 재현된다. */
+function makeRng(seed: string): () => number {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    h = Math.imul(h ^ seed.charCodeAt(i), 16777619);
+  }
+  let a = h >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
