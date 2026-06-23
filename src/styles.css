@@ -583,6 +583,27 @@ html, body {
   font-size: 13px;
   cursor: pointer;
 }
+.stamp-dialog__slider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.stamp-dialog__slider-label {
+  flex: none;
+}
+.stamp-dialog__slider-input {
+  flex: 1;
+  min-width: 0;
+  accent-color: #c43027;
+}
+.stamp-dialog__slider-value {
+  flex: none;
+  width: 38px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #111827;
+  font-size: 13px;
+}
 .stamp-dialog__preview {
   display: flex;
   justify-content: center;
