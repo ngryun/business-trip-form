@@ -1,3 +1,4 @@
+import { shiftDate, suggestEnd, summarizeRange } from './date-range';
 /**
  * 미리보기 위에서 누름틀을 클릭했을 때 떠오르는 입력 팝오버.
  *
@@ -207,14 +208,14 @@ interface RangeChromeArgs {
 }
 
 /**
- * 시작/종료 일시 입력의 공통 UI(탭·빠른선택·달력·경고)를 만든다.
+ * 시작/종료 일시 입력의 공통 UI(직접 입력·빠른선택·기간 요약)를 만든다.
  * 미리보기 팝오버와 사이드바 inline 입력이 같은 동작을 쓰도록 한 곳에 모았다.
  * picker 두 개는 호출자가 만들어 넘긴다 — 팝오버는 익명 picker, 사이드바는 폼의 named hidden 에 묶인 picker.
- * 탭을 오가도 두 피커의 입력 상태는 유지되고, 비활성 탭의 달력만 숨긴다.
+ * 시작·종료 입력을 항상 함께 표시하여 비교하며 수정할 수 있다.
  */
 export function buildDateTimeRangeChrome(args: RangeChromeArgs): RangeChromeHandle {
   const { startPicker, endPicker } = args;
-  let activeTab: 'start' | 'end' = args.initialTab ?? 'start';
+  let previousStart = getDateTimePickerValue(startPicker);
 
   const root = document.createElement('div');
   root.className = 'field-popover__range-chrome';
@@ -225,15 +226,6 @@ export function buildDateTimeRangeChrome(args: RangeChromeArgs): RangeChromeHand
     titleEl.textContent = '출장 일시';
     root.appendChild(titleEl);
   }
-
-  // 시작/종료 탭 — 탭 라벨이 현재 값 요약을 겸한다
-  const tabs = document.createElement('div');
-  tabs.className = 'field-popover__tabs';
-  tabs.setAttribute('role', 'tablist');
-  const startTabBtn = createRangeTabButton();
-  const endTabBtn = createRangeTabButton();
-  tabs.append(startTabBtn, endTabBtn);
-  root.appendChild(tabs);
 
   // 빠른 선택 칩
   const presets = document.createElement('div');
@@ -246,64 +238,77 @@ export function buildDateTimeRangeChrome(args: RangeChromeArgs): RangeChromeHand
 
   const range = document.createElement('div');
   range.className = 'field-popover__range';
-  const startPane = createRangeTabPane(startPicker);
-  const endPane = createRangeTabPane(endPicker);
+  const startPane = createRangeTabPane(startPicker, '시작');
+  const endPane = createRangeTabPane(endPicker, '종료');
   range.append(startPane, endPane);
   root.appendChild(range);
 
-  const warnEl = document.createElement('div');
-  warnEl.className = 'field-popover__range-warning';
-  warnEl.textContent = '⚠ 종료 일시가 시작보다 빠릅니다.';
-  warnEl.hidden = true;
-  root.appendChild(warnEl);
+  const shortcuts = document.createElement('div');
+  shortcuts.className = 'date-range-shortcuts';
+  const summary = document.createElement('div');
+  summary.className = 'date-range-summary';
+  summary.setAttribute('role', 'status');
+  root.append(shortcuts, summary);
 
   function values(): { start: string; end: string } {
-    return {
-      start: getDateTimePickerValue(startPicker),
-      end: getDateTimePickerValue(endPicker),
-    };
+    return { start: getDateTimePickerValue(startPicker), end: getDateTimePickerValue(endPicker) };
   }
-
   function refresh(): void {
     const { start, end } = values();
-    startTabBtn.textContent = start ? `시작 · ${formatDateTimeCompactKR(start)}` : '시작 일시';
-    endTabBtn.textContent = end ? `종료 · ${formatDateTimeCompactKR(end)}` : '종료 일시';
-    startTabBtn.classList.toggle('is-active', activeTab === 'start');
-    endTabBtn.classList.toggle('is-active', activeTab === 'end');
-    startTabBtn.setAttribute('aria-selected', String(activeTab === 'start'));
-    endTabBtn.setAttribute('aria-selected', String(activeTab === 'end'));
-    startPane.hidden = activeTab !== 'start';
-    endPane.hidden = activeTab !== 'end';
-    warnEl.hidden = !(start && end && end < start);
-  }
-
-  function setActiveTab(tab: 'start' | 'end'): void {
-    activeTab = tab;
-    refresh();
-  }
-
-  /** 시작을 고르면 비어 있는 종료를 같은 날 18:00 으로 제안한다 (탭에서 바로 수정 가능). */
-  function handleStartChange(): void {
-    const start = getDateTimePickerValue(startPicker);
-    if (start && !getDateTimePickerValue(endPicker)) {
-      getDateTimePickerController(endPicker)?.setValue(`${start.slice(0, 10)}T18:00`);
+    previousStart = start;
+    summary.textContent = summarizeRange(start, end);
+    const invalid = Boolean(start && end && end < start);
+    summary.classList.toggle('is-invalid', invalid);
+    endPicker.querySelectorAll('input:not([type="hidden"])').forEach((input) => input.setAttribute('aria-invalid', String(invalid)));
+    for (const { button, preset } of presetButtons) {
+      const active = Boolean(start && end && start.slice(11) === preset.startTime && end.slice(11) === preset.endTime
+        && end.slice(0, 10) === shiftDate(start.slice(0, 10), preset.nextDay ? 1 : 0));
+      button.setAttribute('aria-pressed', String(active));
     }
+  }
+  function setActiveTab(tab: 'start' | 'end'): void {
+    (tab === 'start' ? startPicker : endPicker).querySelector<HTMLInputElement>('input[type="date"]')?.focus();
+  }
+  function handleStartChange(): void {
+    const { start, end } = values();
+    getDateTimePickerController(endPicker)?.setValue(suggestEnd(start, previousStart, end));
     refresh();
     args.onChange?.();
   }
-
-  startTabBtn.addEventListener('click', () => setActiveTab('start'));
-  endTabBtn.addEventListener('click', () => setActiveTab('end'));
-
+  function shortcut(label: string, action: () => void): void {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    button.addEventListener('click', () => { action(); refresh(); args.onChange?.(); });
+    shortcuts.append(button);
+  }
+  for (const [label, days] of [['오늘', 0], ['내일', 1]] as const) {
+    shortcut(label, () => {
+      const { start, end } = values();
+      const next = `${shiftDate(todayDateValue(), days)}T${start.slice(11) || '09:00'}`;
+      getDateTimePickerController(startPicker)?.setValue(next);
+      getDateTimePickerController(endPicker)?.setValue(suggestEnd(next, start, end));
+    });
+  }
+  shortcut('종료일을 시작일로', () => {
+    const { start, end } = values();
+    if (start) getDateTimePickerController(endPicker)?.setValue(`${start.slice(0, 10)}T${end.slice(11) || '18:00'}`);
+  });
+  shortcut('일시 지우기', () => {
+    getDateTimePickerController(startPicker)?.setValue('');
+    getDateTimePickerController(endPicker)?.setValue('');
+  });
+  const presetButtons: Array<{ button: HTMLButtonElement; preset: typeof RANGE_PRESETS[number] }> = [];
   for (const preset of RANGE_PRESETS) {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'field-popover__recent-chip';
     chip.textContent = preset.label;
+    presetButtons.push({ button: chip, preset });
     chip.addEventListener('click', () => {
       // 시작 탭에서 고른 날짜 기준, 아직 없으면 오늘
       const date = getDateTimePickerController(startPicker)?.getDate() || todayDateValue();
-      const endDate = preset.nextDay ? addDaysToDateValue(date, 1) : date;
+      const endDate = preset.nextDay ? shiftDate(date, 1) : date;
       getDateTimePickerController(startPicker)?.setValue(`${date}T${preset.startTime}`);
       getDateTimePickerController(endPicker)?.setValue(`${endDate}T${preset.endTime}`);
       refresh();
@@ -724,30 +729,17 @@ function createSubmitDateInput(initial: string): HTMLElement {
   return root;
 }
 
-function createRangeTabButton(): HTMLButtonElement {
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'field-popover__tab';
-  btn.setAttribute('role', 'tab');
-  return btn;
-}
-
-function createRangeTabPane(picker: HTMLElement): HTMLElement {
+function createRangeTabPane(picker: HTMLElement, title: string): HTMLElement {
   const pane = document.createElement('section');
   pane.className = 'field-popover__range-field';
-  pane.setAttribute('role', 'tabpanel');
-  picker.classList.add('field-popover__range-picker');
-  pane.appendChild(picker);
+  pane.setAttribute('aria-label', `${title} 일시`);
+  const heading = document.createElement('div');
+  heading.className = 'date-range-heading';
+  heading.textContent = title;
+  picker.querySelector('input[type="date"]')?.setAttribute('aria-label', `${title} 날짜`);
+  picker.querySelector('input[type="time"]')?.setAttribute('aria-label', `${title} 시간 (10분 단위)`);
+  pane.append(heading, picker);
   return pane;
-}
-
-/** `YYYY-MM-DD` 에 일수를 더한다 (월/년 경계는 Date 가 처리). */
-function addDaysToDateValue(date: string, days: number): string {
-  const m = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return date;
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + days);
-  const pad = (v: number): string => String(v).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 function getInputValue(el: HTMLElement): string {
@@ -775,7 +767,7 @@ function focusInput(input: HTMLElement): void {
   }
   const target = input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement || input instanceof HTMLSelectElement
     ? input
-    : input.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement>('button, input, textarea, select');
+    : input.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement>('input:not([type="hidden"]), textarea, select, button');
   if (!target) return;
   target.focus();
   if (target instanceof HTMLInputElement && target.type === 'text') target.select();

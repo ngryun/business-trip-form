@@ -648,7 +648,12 @@ function applyTravelDateDefault(control: HTMLElement): void {
 
   const date = dateTimeControllers.get(control)?.getDate();
   const target = formEl.elements.namedItem(targetName) as HTMLInputElement | null;
-  if (!date || !target) return;
+  if (!target) return;
+  if (!date) {
+    if (autoTravelDates.get(targetName) === target.value) target.value = '';
+    autoTravelDates.delete(targetName);
+    return;
+  }
   const previousAutoDate = autoTravelDates.get(targetName);
   if (target.value && target.value !== previousAutoDate) {
     if (target.value === date) autoTravelDates.set(targetName, date);
@@ -695,7 +700,9 @@ function syncFareRowControls(): void {
     const group = formEl.querySelector<HTMLElement>(`[data-fare-inputs="${direction}"]`)!;
     group.hidden = deleted;
     group.querySelectorAll('input').forEach((input) => { input.disabled = deleted; });
-    formEl.querySelector(`[data-fare-toggle="${direction}"]`)!.textContent = deleted ? '행 복원' : '행 삭제';
+    const button = formEl.querySelector(`[data-fare-toggle="${direction}"]`)!;
+    button.textContent = deleted ? '행 복원' : '행 삭제';
+    button.setAttribute('aria-label', `${direction === '갈때' ? '갈 때' : '올 때'} 운임 ${deleted ? '행 복원' : '행 삭제'}`);
   }
 }
 
@@ -725,6 +732,11 @@ async function initialize(): Promise<void> {
   setupReturnLocationDefaults();
   setupAttachmentPresets();
   setupLocalFormPersistence();
+  document.getElementById('btn-submit-today')?.addEventListener('click', () => {
+    const input = formEl.elements.namedItem('제출날짜') as HTMLInputElement;
+    input.value = todayDateValue();
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
   setupApplicantInfoStorage();
   await preloadFonts();
 
@@ -852,7 +864,7 @@ async function initialize(): Promise<void> {
   }
 
   let livePreviewTimer = 0;
-  function scheduleLivePreview(statusMessage = '입력 내용을 미리보기에 반영했습니다.'): void {
+  function scheduleLivePreview(statusMessage?: string): void {
     window.clearTimeout(livePreviewTimer);
     livePreviewTimer = window.setTimeout(() => {
       try {

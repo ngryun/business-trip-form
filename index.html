@@ -56,7 +56,7 @@
 
           <fieldset>
             <legend>출장 일시 / 장소</legend>
-            <div class="field-label">출장 일시</div>
+            <div class="field-label">날짜 직접 입력 또는 달력 선택 · 시간은 10분 단위</div>
             <div class="datetime-range" id="datetime-range">
               <span class="datetime-picker" data-datetime-picker="시작일시" data-datetime-default-hour="09">
                 <input name="시작일시" type="hidden" />
@@ -69,10 +69,11 @@
           </fieldset>
 
           <fieldset>
-            <legend>갈 때 운임 <button type="button" data-fare-toggle="갈때">행 삭제</button></legend>
+            <legend>갈 때 운임 <button type="button" data-fare-toggle="갈때" class="fare-toggle" aria-label="갈 때 운임 행 삭제">행 삭제</button></legend>
             <input type="hidden" name="갈때운임삭제" value="0" />
             <div data-fare-inputs="갈때">
             <label>일자 <input name="갈때일자" type="date" required /></label>
+            <p class="field-hint">출장 일시에서 자동 입력되며 직접 수정할 수 있습니다.</p>
             <label>교통편
               <input name="갈때교통편" type="text" list="transport-options" placeholder="선택 또는 직접 입력" required />
             </label>
@@ -82,10 +83,11 @@
           </fieldset>
 
           <fieldset>
-            <legend>올 때 운임 <button type="button" data-fare-toggle="올때">행 삭제</button></legend>
+            <legend>올 때 운임 <button type="button" data-fare-toggle="올때" class="fare-toggle" aria-label="올 때 운임 행 삭제">행 삭제</button></legend>
             <input type="hidden" name="올때운임삭제" value="0" />
             <div data-fare-inputs="올때">
             <label>일자 <input name="올때일자" type="date" required /></label>
+            <p class="field-hint">출장 일시에서 자동 입력되며 직접 수정할 수 있습니다.</p>
             <label>교통편
               <input name="올때교통편" type="text" list="transport-options" placeholder="선택 또는 직접 입력" required />
             </label>
@@ -111,19 +113,27 @@
             <legend>동승자 현황</legend>
             <label>총 동승자수 (신청인 포함) <input name="총동승자수" type="text" placeholder="예: 3명" /></label>
             <p>동승자 명단 (신청인 제외)</p>
+            <div class="passenger-row">
             <label>동승자 1 소속 <input name="동승자1소속" type="text" /></label>
             <label>동승자 1 성명 <input name="동승자1성명" type="text" /></label>
+            </div>
+            <div class="passenger-row">
             <label>동승자 2 소속 <input name="동승자2소속" type="text" /></label>
             <label>동승자 2 성명 <input name="동승자2성명" type="text" /></label>
+            </div>
+            <div class="passenger-row">
             <label>동승자 3 소속 <input name="동승자3소속" type="text" /></label>
             <label>동승자 3 성명 <input name="동승자3성명" type="text" /></label>
+            </div>
+            <div class="passenger-row">
             <label>동승자 4 소속 <input name="동승자4소속" type="text" /></label>
             <label>동승자 4 성명 <input name="동승자4성명" type="text" /></label>
+            </div>
           </fieldset>
 
           <fieldset>
             <legend>기타</legend>
-            <label>제출 날짜 <input name="제출날짜" type="date" required /></label>
+            <label>제출 날짜 <span class="date-with-action"><input name="제출날짜" type="date" required /><button type="button" id="btn-submit-today">오늘</button></span></label>
             <label>첨부서류 (텍스트)
               <span id="attachment-presets" class="attachment-presets" aria-label="자주 쓰는 첨부서류"></span>
               <textarea name="첨부서류" rows="3" placeholder="예: 주유영수증 1매, 하이패스영수증 1매"></textarea>
