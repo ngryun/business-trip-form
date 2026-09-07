@@ -1,3 +1,4 @@
+import { applyExpenseFields, removeFareRows } from './expense-fields';
 import { loadTemplate } from './template-loader';
 import { discoverFields, fillDateTimeRange, removeDateTimeRangeSeparator, setFieldValues, type FieldMap } from './field-filler';
 import { downloadHwp } from './download';
@@ -120,6 +121,11 @@ function collectFormValues(): Record<string, string> {
     raw[k] = typeof v === 'string' ? v : '';
   });
   const name = raw.성명 ?? '';
+  for (const direction of ['갈때', '올때']) {
+    if (raw[`${direction}운임삭제`] === '1') {
+      for (const suffix of ['일자', '교통편', '출발지', '도착지']) raw[`${direction}${suffix}`] = '';
+    }
+  }
   const startDateTime = raw.시작일시 ?? '';
   const endDateTime = raw.종료일시 ?? '';
   return {
@@ -682,6 +688,30 @@ function applyReturnLocationDefault(sourceName: string): boolean {
   return true;
 }
 
+function syncFareRowControls(): void {
+  for (const direction of ['갈때', '올때']) {
+    const flag = formEl.elements.namedItem(`${direction}운임삭제`) as HTMLInputElement;
+    const deleted = flag.value === '1';
+    const group = formEl.querySelector<HTMLElement>(`[data-fare-inputs="${direction}"]`)!;
+    group.hidden = deleted;
+    group.querySelectorAll('input').forEach((input) => { input.disabled = deleted; });
+    formEl.querySelector(`[data-fare-toggle="${direction}"]`)!.textContent = deleted ? '행 복원' : '행 삭제';
+  }
+}
+
+function setupFareRowControls(): void {
+  syncFareRowControls();
+  formEl.querySelectorAll<HTMLButtonElement>('[data-fare-toggle]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const flag = formEl.elements.namedItem(`${button.dataset.fareToggle}운임삭제`) as HTMLInputElement;
+      flag.value = flag.value === '1' ? '0' : '1';
+      // hidden input의 value 변경은 defaultValue도 바꾸므로 초기화 기준을 별도로 복원한다.
+      syncFareRowControls();
+      flag.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  });
+}
+
 async function initialize(): Promise<void> {
   setStatus('양식 엔진 초기화 중...');
   registerFontFaces();
@@ -689,6 +719,7 @@ async function initialize(): Promise<void> {
   const restoredFormState = restoreFormState();
   // URL 쿼리스트링은 localStorage 복원본보다 우선한다 — 공유받은 URL 의 의도를 존중.
   const urlFormApplied = applyUrlFormValuesToInputs();
+  setupFareRowControls();
   setDefaultSubmitDate();
   setupDateTimeControls();
   setupReturnLocationDefaults();
@@ -741,11 +772,13 @@ async function initialize(): Promise<void> {
    * 실패한다(페이지 새로고침 전까지 복구 불가). 그래서 범위를 비워야 할 때는 지우는 대신
    * 원본 바이트를 다시 로드하고 나머지 값을 처음부터 채운다.
    */
+  let appliedFareState = '0,0';
   function reloadPristineTemplate(): void {
     const storedStamp = signatureStamp.getStoredStamp();
     const hadStamp = signatureStamp.hasStamp();
     signatureStamp.forgetDocumentState();
     wasm.loadDocument(templateBytes);
+    removeFareRows(wasm, collectRawFormValues());
     fields = discoverFields(wasm);
     removeDateTimeRangeSeparator(wasm, fields);
     wasm.refreshLayout();
@@ -764,9 +797,13 @@ async function initialize(): Promise<void> {
     options: PreviewApplyOptions = {},
   ): void {
     const { 시작일시: rangeText, ...values } = collectFormValues();
-    if (options.clearEmpty && !rangeText && hasFilledRangeField()) {
+    const rawValues = collectRawFormValues();
+    const fareState = ['갈때', '올때'].map((direction) => rawValues[`${direction}운임삭제`] === '1' ? '1' : '0').join(',');
+    if (fareState !== appliedFareState || (options.clearEmpty && !rangeText && hasFilledRangeField())) {
       reloadPristineTemplate();
+      appliedFareState = fareState;
     }
+    applyExpenseFields(wasm, rawValues);
     const { applied, missing } = setFieldValues(wasm, fields, values, {
       clearEmpty: options.clearEmpty,
     });
@@ -1055,6 +1092,8 @@ async function initialize(): Promise<void> {
 
   document.getElementById('btn-download-hwp')!.addEventListener('click', async () => {
     try {
+      window.clearTimeout(livePreviewTimer);
+      applyCollectedValuesToPreview(undefined, { clearEmpty: true });
       pushRecentValuesFromForm();
       const fileName = suggestFileName(collectFormValues());
       setStatus('HWP 다운로드 준비 중...');
@@ -1070,6 +1109,8 @@ async function initialize(): Promise<void> {
     const btn = document.getElementById('btn-print') as HTMLButtonElement;
     btn.disabled = true;
     try {
+      window.clearTimeout(livePreviewTimer);
+      applyCollectedValuesToPreview(undefined, { clearEmpty: true });
       pushRecentValuesFromForm();
       const fileName = suggestPdfFileName(collectFormValues());
       setStatus('PDF를 준비 중...');
@@ -1111,6 +1152,10 @@ async function initialize(): Promise<void> {
     window.clearTimeout(livePreviewTimer);
     const removedStamp = signatureStamp.clear();
     formEl.reset();
+    for (const direction of ['갈때', '올때']) {
+      (formEl.elements.namedItem(`${direction}운임삭제`) as HTMLInputElement).value = '0';
+    }
+    syncFareRowControls();
     autoTravelDates.clear();
     autoReturnLocations.clear();
     clearSavedFormState();
