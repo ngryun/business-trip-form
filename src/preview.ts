@@ -10,8 +10,10 @@ import { CanvasView } from '@/view/canvas-view';
  */
 let canvasView: CanvasView | null = null;
 let eventBus: EventBus | null = null;
+let scrollContainer: HTMLElement | null = null;
 
 export function mountPreview(container: HTMLElement, wasm: WasmBridge): CanvasView {
+  scrollContainer = container;
   if (canvasView) {
     canvasView.loadDocument();
     return canvasView;
@@ -20,6 +22,20 @@ export function mountPreview(container: HTMLElement, wasm: WasmBridge): CanvasVi
   canvasView = new CanvasView(container, wasm, eventBus);
   canvasView.loadDocument();
   return canvasView;
+}
+
+/**
+ * 스크롤 위치를 유지한 채 다시 그린다.
+ *
+ * CanvasView.loadDocument() 는 (upstream 코드라 그대로 둔다) 항상 맨 위로 스크롤해서,
+ * 아래쪽 칸(동승자 명단 등)을 미리보기에서 고치거나 폼에 한 글자 칠 때마다 화면이 튄다.
+ */
+export function reloadPreservingScroll(view: CanvasView): void {
+  const top = scrollContainer?.scrollTop ?? 0;
+  view.loadDocument();
+  if (!scrollContainer || top <= 0) return;
+  const maxTop = Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight);
+  scrollContainer.scrollTop = Math.min(top, maxTop);
 }
 
 export function getCanvasView(): CanvasView | null {
@@ -67,5 +83,5 @@ export function refreshPreview(wasm: WasmBridge): void {
     try { wasm.refreshLayout(); } catch { /* ignore */ }
   }
 
-  canvasView.loadDocument();
+  reloadPreservingScroll(canvasView);
 }

@@ -1,11 +1,12 @@
 import { applyExpenseFields, removeFareRows } from './expense-fields';
+import { getCellRegions, invalidateCellRegions } from './cell-fields';
 import { loadTemplate } from './template-loader';
 import { discoverFields, fillDateTimeRange, removeDateTimeRangeSeparator, setFieldValues, type FieldMap } from './field-filler';
 import { downloadHwp } from './download';
-import { mountPreview, refreshPreview, setPreviewReloadHook } from './preview';
+import { mountPreview, refreshPreview, reloadPreservingScroll, setPreviewReloadHook } from './preview';
 import { registerFontFaces, preloadFonts } from './fonts';
 import { attachInlineEditing } from './field-interaction';
-import { buildDateTimeRangeChrome, showStampPopover, type RangeChromeHandle } from './field-popover';
+import { buildDateTimeRangeChrome, showStampPopover, type FareDirection, type RangeChromeHandle } from './field-popover';
 import { setupDateTimePicker, type DateTimePickerController } from './datetime-picker';
 import { SignatureStampManager, type StoredSignatureStamp } from './signature-stamp';
 import { openStampGenerator } from './stamp-generator';
@@ -706,15 +707,59 @@ function syncFareRowControls(): void {
   }
 }
 
+/** 운임 행 삭제 상태를 토글한다 — 사이드패널 버튼과 미리보기 팝오버가 함께 쓴다. */
+function toggleFareRow(direction: FareDirection): void {
+  const flag = formEl.elements.namedItem(`${direction}운임삭제`) as HTMLInputElement | null;
+  if (!flag) return;
+  flag.value = flag.value === '1' ? '0' : '1';
+  // hidden input의 value 변경은 defaultValue도 바꾸므로 초기화 기준을 별도로 복원한다.
+  syncFareRowControls();
+  flag.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function getFareDeletedState(): Record<FareDirection, boolean> {
+  const read = (direction: FareDirection): boolean =>
+    (formEl.elements.namedItem(`${direction}운임삭제`) as HTMLInputElement | null)?.value === '1';
+  return { 갈때: read('갈때'), 올때: read('올때') };
+}
+
+/** 미리보기 셀 편집용 — 대응하는 폼 입력값을 읽는다. */
+function getFormFieldValue(name: string): string {
+  const control = formEl.elements.namedItem(name);
+  if (
+    control instanceof HTMLInputElement ||
+    control instanceof HTMLSelectElement ||
+    control instanceof HTMLTextAreaElement
+  ) {
+    return control.value;
+  }
+  return '';
+}
+
+/**
+ * 미리보기 셀 편집용 — 폼 입력에 값을 넣고 input 이벤트를 흘려 기존 반영 경로를 그대로 탄다.
+ * (임시 저장 → applyExpenseFields → 미리보기 재렌더까지 사이드패널 입력과 동일하게 처리된다.)
+ */
+function setFormFieldValue(name: string, value: string): boolean {
+  const control = formEl.elements.namedItem(name);
+  if (
+    !(control instanceof HTMLInputElement) &&
+    !(control instanceof HTMLSelectElement) &&
+    !(control instanceof HTMLTextAreaElement)
+  ) {
+    return false;
+  }
+  if (control.value === value) return false;
+  setFormControlValue(control, value);
+  control.dispatchEvent(new Event('input', { bubbles: true }));
+  return true;
+}
+
 function setupFareRowControls(): void {
   syncFareRowControls();
   formEl.querySelectorAll<HTMLButtonElement>('[data-fare-toggle]').forEach((button) => {
     button.addEventListener('click', () => {
-      const flag = formEl.elements.namedItem(`${button.dataset.fareToggle}운임삭제`) as HTMLInputElement;
-      flag.value = flag.value === '1' ? '0' : '1';
-      // hidden input의 value 변경은 defaultValue도 바꾸므로 초기화 기준을 별도로 복원한다.
-      syncFareRowControls();
-      flag.dispatchEvent(new Event('input', { bubbles: true }));
+      toggleFareRow(button.dataset.fareToggle as FareDirection);
     });
   });
 }
@@ -892,12 +937,26 @@ async function initialize(): Promise<void> {
     scheduleLivePreview();
   });
 
-  // 4) 인라인 편집 핸들러 부착 — 누름틀 + (인)/도장 영역
+  // 4) 인라인 편집 핸들러 부착 — 누름틀 + 일반 셀(식비·동승자·운임) + (인)/도장 영역
   attachInlineEditing({
     wasm,
     canvasView,
     container: previewContainer,
     getFields: () => fields,
+    cells: {
+      getRegions: () => getCellRegions(wasm),
+      getValue: (key) => getFormFieldValue(key),
+      commit: (key, value) => {
+        if (!setFormFieldValue(key, value)) return;
+        setStatus(value ? `"${value}" 을(를) 반영했습니다.` : '해당 칸을 비웠습니다.');
+      },
+      getFareDeleted: () => getFareDeletedState(),
+      toggleFare: (direction) => {
+        toggleFareRow(direction);
+        const deleted = getFareDeletedState()[direction];
+        setStatus(`${direction === '갈때' ? '갈 때' : '올 때'} 운임 행을 ${deleted ? '삭제' : '복원'}했습니다.`);
+      },
+    },
     stamp: {
       getRect: () => signatureStamp.getInteractionRect(),
       onOpen: (anchor) => {
@@ -1022,8 +1081,10 @@ async function initialize(): Promise<void> {
 
   function refreshPreviewAndRealignSignatureStamp(): void {
     refreshPreview(wasm);
+    // 문서를 다시 그리면 표 좌표가 달라지므로 미리보기 셀 영역 캐시를 버린다.
+    invalidateCellRegions();
     if (realignSignatureStamp()) {
-      canvasView.loadDocument();
+      reloadPreservingScroll(canvasView);
     }
   }
 

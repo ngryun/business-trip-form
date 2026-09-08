@@ -13,9 +13,17 @@
 import type { WasmBridge } from '@/core/wasm-bridge';
 import type { CanvasView } from '@/view/canvas-view';
 import type { DocumentPosition, FieldInfoResult, HitTestResult } from '@/core/types';
+import type { CellRegion } from './cell-fields';
 import { FIELD_CONFIGS, formatDateTimeRange, formatForLabel, parseDateTimeRange, parseFromHWP } from './field-config';
 import { fillDateTimeRange, setFieldValues, type FieldMap } from './field-filler';
-import { closeFieldPopover, isPopoverOpen, showDateTimeRangePopover, showFieldPopover } from './field-popover';
+import {
+  closeFieldPopover,
+  isPopoverOpen,
+  showDateTimeRangePopover,
+  showFareRowPopover,
+  showFieldPopover,
+  type FareDirection,
+} from './field-popover';
 import { getRecentValues, pushRecentValue } from './recent-values';
 
 /** 라벨별로 "최근 입력" 자동완성을 노출할 가치가 있는 항목만 추적한다 (반복 입력이 잦은 텍스트류). */
@@ -35,6 +43,22 @@ export interface InlineEditDeps {
   getFields: () => FieldMap;
   /** 편집 적용 직후 호출 — 미리보기 갱신·필드 재스캔·폼 동기화 등 */
   onAfterEdit: (label: string, value: string) => void;
+  /**
+   * 누름틀이 아닌 일반 표 칸(식비·동승자) 과 운임 행 삭제/복원.
+   * 값의 단일 출처는 사이드패널 폼이라, 여기서는 폼 값을 읽고 쓰는 콜백만 받는다.
+   */
+  cells?: {
+    /** 현재 클릭 가능한 셀 영역 목록 (페이지 좌표) */
+    getRegions: () => CellRegion[];
+    /** 셀에 대응하는 폼 입력값 */
+    getValue: (key: string) => string;
+    /** 셀 값 반영 — 빈 문자열이면 칸을 비운다 */
+    commit: (key: string, value: string) => void;
+    /** 운임 행의 현재 삭제 상태 */
+    getFareDeleted: () => Record<FareDirection, boolean>;
+    /** 운임 행 삭제/복원 토글 */
+    toggleFare: (direction: FareDirection) => void;
+  };
   /** (인)/도장 영역 상호작용 — 제공되면 미리보기에서 클릭으로 도장 메뉴를 연다 */
   stamp?: {
     /** 페이지 좌표 기준 클릭 영역 ((인) 표식 ∪ 현재 도장). 없으면 null */
@@ -58,6 +82,10 @@ interface PageRect {
   width: number;
   height: number;
 }
+
+/** 하이라이트 재계산 여부만 가리는 합성 id — 실제 fieldId 와 겹치지 않도록 음수를 쓴다. */
+const STAMP_HIGHLIGHT_ID = -999;
+const CELL_HIGHLIGHT_BASE_ID = -1000;
 
 interface ContentRect {
   left: number;
@@ -90,7 +118,7 @@ interface FieldLocationPathEntry {
 }
 
 export function attachInlineEditing(deps: InlineEditDeps): () => void {
-  const { wasm, canvasView, container, getFields, onAfterEdit, stamp } = deps;
+  const { wasm, canvasView, container, getFields, onAfterEdit, stamp, cells } = deps;
   const scrollContent = container.querySelector<HTMLElement>('#scroll-content');
   if (!scrollContent) return () => undefined;
 
@@ -110,6 +138,14 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
       e.stopPropagation();
       hideHighlight();
       openPopoverFor(hit, { x: e.clientX, y: e.clientY });
+      return;
+    }
+    const cellHit = resolveCellAt(e);
+    if (cellHit) {
+      e.preventDefault();
+      e.stopPropagation();
+      hideHighlight();
+      openCellPopoverFor(cellHit.region, { x: e.clientX, y: e.clientY });
       return;
     }
     const stampRect = resolveStampAt(e);
@@ -137,6 +173,12 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
       if (hit) {
         scrollContent.style.cursor = 'pointer';
         showHighlight(hit);
+        return;
+      }
+      const cellHit = resolveCellAt(ev);
+      if (cellHit) {
+        scrollContent.style.cursor = 'pointer';
+        showRectHighlight(cellHit.region.rect, CELL_HIGHLIGHT_BASE_ID - cellHit.index);
         return;
       }
       const stampRect = resolveStampAt(ev);
@@ -215,6 +257,50 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
     if (point.pageX < rect.x - pad || point.pageX > rect.x + rect.width + pad) return null;
     if (point.pageY < rect.y - pad || point.pageY > rect.y + rect.height + pad) return null;
     return rect;
+  }
+
+  /** 마우스가 편집 가능한 일반 셀(식비·동승자·운임 제목) 위에 있으면 그 영역을 반환 */
+  function resolveCellAt(e: MouseEvent): { region: CellRegion; index: number } | null {
+    if (!cells) return null;
+    let regions: CellRegion[];
+    try {
+      regions = cells.getRegions();
+    } catch {
+      return null;
+    }
+    if (regions.length === 0) return null;
+    const point = toPagePoint(e);
+    if (!point) return null;
+    // 칸 안쪽만 잡는다 — 표 선 위에서는 인접 칸끼리 하이라이트가 튀지 않도록 여유를 두지 않는다.
+    for (let index = 0; index < regions.length; index += 1) {
+      const { rect } = regions[index];
+      if (point.pageIdx !== rect.pageIndex) continue;
+      if (point.pageX < rect.x || point.pageX > rect.x + rect.width) continue;
+      if (point.pageY < rect.y || point.pageY > rect.y + rect.height) continue;
+      return { region: regions[index], index };
+    }
+    return null;
+  }
+
+  function openCellPopoverFor(region: CellRegion, anchor: { x: number; y: number }): void {
+    if (!cells) return;
+    if (region.kind === 'fare') {
+      showFareRowPopover({
+        anchor,
+        deleted: cells.getFareDeleted(),
+        onToggle: (direction) => cells.toggleFare(direction),
+      });
+      return;
+    }
+    showFieldPopover({
+      label: region.label,
+      config: { type: 'text' },
+      placeholder: region.placeholder,
+      initialValue: cells.getValue(region.key),
+      anchor,
+      onConfirm: (raw) => cells.commit(region.key, raw.trim()),
+      onCancel: () => undefined,
+    });
   }
 
   /** 마우스 이벤트 → 누름틀 정보 (FIELD_CONFIGS 에 등록된 라벨만) */
@@ -465,11 +551,10 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
     el.style.display = 'block';
   }
 
-  /** 필드가 아닌 임의 페이지 사각형((인)/도장 영역)에 호버 하이라이트를 표시 */
-  const STAMP_HIGHLIGHT_ID = -999;
-  function showRectHighlight(rect: PageRect): void {
+  /** 필드가 아닌 임의 페이지 사각형((인)/도장 영역, 일반 셀)에 호버 하이라이트를 표시 */
+  function showRectHighlight(rect: PageRect, highlightId: number = STAMP_HIGHLIGHT_ID): void {
     const el = ensureHighlightEl();
-    if (hlFieldId !== STAMP_HIGHLIGHT_ID) {
+    if (hlFieldId !== highlightId) {
       const c = pageRectToContent(rect);
       if (!c || c.width <= 0 || c.height <= 0) {
         hideHighlight();
@@ -480,7 +565,7 @@ export function attachInlineEditing(deps: InlineEditDeps): () => void {
       el.style.top = `${c.top - pad}px`;
       el.style.width = `${c.width + pad * 2}px`;
       el.style.height = `${c.height + pad * 2}px`;
-      hlFieldId = STAMP_HIGHLIGHT_ID;
+      hlFieldId = highlightId;
     }
     el.style.display = 'block';
   }

@@ -27,12 +27,25 @@ export interface PopoverArgs {
   initialValue: string;
   /** 클라이언트 좌표계 기준 누름틀 근처 위치 (보통 클릭한 점) */
   anchor: { x: number; y: number };
+  /** FIELD_CONFIGS 에 없는 라벨(누름틀이 아닌 일반 표 칸 등)을 편집할 때 위젯을 직접 지정한다. */
+  config?: WidgetConfig;
+  /** 입력창 placeholder — 지정하지 않으면 표시하지 않는다. */
+  placeholder?: string;
   /** 최근에 같은 라벨에 입력했던 원시 값 목록 (date 는 `YYYY-MM-DD`). 비우면 표시 안 함. */
   recentValues?: string[];
   onConfirm: (value: string) => void;
   onCancel: () => void;
   onNext?: (value: string) => void;
 }
+
+export interface FareRowPopoverArgs {
+  anchor: { x: number; y: number };
+  /** 방향별 현재 행 삭제 상태 */
+  deleted: Record<FareDirection, boolean>;
+  onToggle: (direction: FareDirection) => void;
+}
+
+export type FareDirection = '갈때' | '올때';
 
 export interface DateTimeRangePopoverArgs {
   anchor: { x: number; y: number };
@@ -72,7 +85,7 @@ let currentCleanup: (() => void) | null = null;
 
 export function showFieldPopover(args: PopoverArgs): void {
   closeFieldPopover();
-  const cfg = FIELD_CONFIGS[args.label];
+  const cfg = args.config ?? FIELD_CONFIGS[args.label];
   if (!cfg) return;
 
   const root = document.createElement('div');
@@ -88,6 +101,9 @@ export function showFieldPopover(args: PopoverArgs): void {
   const input = createInput(args.label, cfg, args.initialValue);
   if (cfg.type !== 'select' && !input.classList.contains('field-popover__date')) {
     input.classList.add('field-popover__input');
+  }
+  if (args.placeholder && (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement)) {
+    input.placeholder = args.placeholder;
   }
 
   // 최근 입력 칩: 같은 라벨에 이전에 넣었던 값을 한 번 클릭으로 채워 넣고 바로 확정한다.
@@ -518,6 +534,79 @@ export function showStampPopover(args: StampPopoverArgs): void {
 
   setTimeout(() => {
     root.querySelector<HTMLElement>('input, button')?.focus();
+  }, 0);
+
+  currentPopover = root;
+}
+
+/**
+ * 미리보기의 "운 임" 제목 칸을 눌렀을 때 뜨는 행 삭제/복원 메뉴.
+ *
+ * 행이 이미 지워지면 그 자리를 클릭할 수 없으므로, 항상 남아 있는 제목 칸을 입구로 삼아
+ * 갈 때·올 때 두 행의 삭제와 복원을 한곳에서 처리한다.
+ */
+export function showFareRowPopover(args: FareRowPopoverArgs): void {
+  closeFieldPopover();
+
+  const root = document.createElement('div');
+  root.className = 'field-popover field-popover--menu';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-label', '운임 행 편집');
+
+  const titleEl = document.createElement('div');
+  titleEl.className = 'field-popover__title';
+  titleEl.textContent = '운임 행';
+  root.appendChild(titleEl);
+
+  const hint = document.createElement('p');
+  hint.className = 'field-popover__hint';
+  hint.textContent = '쓰지 않는 운임 행을 지우거나 되살립니다.';
+  root.appendChild(hint);
+
+  const actions = document.createElement('div');
+  actions.className = 'field-popover__menu-actions';
+  for (const direction of ['갈때', '올때'] as FareDirection[]) {
+    const deleted = args.deleted[direction];
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `field-popover__menu-action${deleted ? '' : ' field-popover__menu-action--danger'}`;
+    btn.textContent = `${direction === '갈때' ? '갈 때' : '올 때'} 운임 ${deleted ? '행 복원' : '행 삭제'}`;
+    btn.addEventListener('click', () => {
+      closeFieldPopover();
+      args.onToggle(direction);
+    });
+    actions.appendChild(btn);
+  }
+  root.appendChild(actions);
+
+  const buttons = document.createElement('div');
+  buttons.className = 'field-popover__buttons';
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'field-popover__cancel';
+  closeBtn.textContent = '닫기';
+  closeBtn.addEventListener('click', () => closeFieldPopover());
+  buttons.appendChild(closeBtn);
+  root.appendChild(buttons);
+
+  root.addEventListener('keydown', (e) => {
+    if ((e as KeyboardEvent).key === 'Escape') {
+      e.preventDefault();
+      closeFieldPopover();
+    }
+  });
+
+  document.body.appendChild(root);
+  positionNear(root, args.anchor);
+
+  const onOuter = (e: MouseEvent): void => {
+    if (!root.contains(e.target as Node)) closeFieldPopover();
+  };
+  setTimeout(() => document.addEventListener('mousedown', onOuter, { capture: true }), 0);
+  currentCleanup = () => document.removeEventListener('mousedown', onOuter, { capture: true } as any);
+
+  setTimeout(() => {
+    root.querySelector<HTMLButtonElement>('.field-popover__menu-action')?.focus();
   }, 0);
 
   currentPopover = root;
