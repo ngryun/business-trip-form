@@ -22,6 +22,14 @@
       <!-- 입력 폼 -->
       <section class="form-pane" aria-label="입력 폼">
         <form id="trip-form" autocomplete="off">
+          <div class="form-tabs" role="tablist" aria-label="입력 항목">
+            <button type="button" id="form-tab-basic" role="tab" aria-controls="form-panel-basic" aria-selected="true" tabindex="0" data-form-tab="basic">기본 정보</button>
+            <button type="button" id="form-tab-fare" role="tab" aria-controls="form-panel-fare" aria-selected="false" tabindex="-1" data-form-tab="fare">운임</button>
+            <button type="button" id="form-tab-passengers" role="tab" aria-controls="form-panel-passengers" aria-selected="false" tabindex="-1" data-form-tab="passengers">동승자</button>
+            <button type="button" id="form-tab-submit" role="tab" aria-controls="form-panel-submit" aria-selected="false" tabindex="-1" data-form-tab="submit">제출</button>
+          </div>
+          <div class="form-section-scroll">
+          <div id="form-panel-basic" class="form-tab-panel" role="tabpanel" aria-labelledby="form-tab-basic" tabindex="0">
           <fieldset class="applicant-fieldset">
             <legend class="applicant-legend">
               <span>신청자 정보</span>
@@ -29,11 +37,15 @@
               <button type="button" id="btn-clear-applicants" class="applicant-legend-button applicant-legend-button--danger">전체 삭제</button>
             </legend>
             <label>소속 <input name="소속" type="text" list="applicant-org-options" autocomplete="organization" required /></label>
+            <div class="form-two-columns">
             <label>직급 <input name="직급" type="text" list="applicant-position-options" autocomplete="organization-title" required /></label>
             <label>성명 <input name="성명" type="text" list="applicant-name-options" autocomplete="name" required /></label>
+            </div>
             <datalist id="applicant-org-options"></datalist>
             <datalist id="applicant-position-options"></datalist>
             <datalist id="applicant-name-options"></datalist>
+            <details class="signature-details">
+              <summary>도장 / 서명 설정</summary>
             <label class="signature-control">도장/서명 이미지
               <span id="signature-current" class="signature-current" hidden>
                 <img id="signature-current-thumb" class="signature-current__thumb" alt="현재 도장 미리보기" />
@@ -52,6 +64,7 @@
                 <button type="button" id="btn-clear-saved-signature" class="signature-control__button signature-control__button--danger" title="브라우저에 저장된 도장/서명 이미지를 삭제합니다" disabled>저장 삭제</button>
               </span>
             </label>
+            </details>
           </fieldset>
 
           <fieldset>
@@ -68,6 +81,12 @@
             <label>출장지 <input name="출장지" type="text" required /></label>
           </fieldset>
 
+          <fieldset>
+            <legend>식비</legend>
+            <label>지급받은 금액 <input name="식비지급받은금액" type="text" placeholder="예: 2식, 20,000원, 지급 없음" /></label>
+          </fieldset>
+          </div>
+          <div id="form-panel-fare" class="form-tab-panel" role="tabpanel" aria-labelledby="form-tab-fare" tabindex="0" hidden>
           <fieldset>
             <legend>갈 때 운임 <button type="button" data-fare-toggle="갈때" class="fare-toggle" aria-label="갈 때 운임 행 삭제">행 삭제</button></legend>
             <input type="hidden" name="갈때운임삭제" value="0" />
@@ -105,10 +124,8 @@
             <option>택시</option>
           </datalist>
 
-          <fieldset>
-            <legend>식비</legend>
-            <label>지급받은 금액 <input name="식비지급받은금액" type="text" placeholder="예: 2식, 20,000원, 지급 없음" /></label>
-          </fieldset>
+          </div>
+          <div id="form-panel-passengers" class="form-tab-panel" role="tabpanel" aria-labelledby="form-tab-passengers" tabindex="0" hidden>
           <fieldset>
             <legend>동승자 현황</legend>
             <label>총 동승자수 (신청인 포함) <input name="총동승자수" type="text" placeholder="예: 3명" /></label>
@@ -131,6 +148,8 @@
             </div>
           </fieldset>
 
+          </div>
+          <div id="form-panel-submit" class="form-tab-panel" role="tabpanel" aria-labelledby="form-tab-submit" tabindex="0" hidden>
           <fieldset>
             <legend>기타</legend>
             <label>제출 날짜 <span class="date-with-action"><input name="제출날짜" type="date" required /><button type="button" id="btn-submit-today">오늘</button></span></label>
@@ -140,10 +159,12 @@
             </label>
           </fieldset>
 
+          </div>
+          </div>
           <div class="actions">
             <button type="button" id="btn-show-preview" class="mobile-only">미리보기 확인</button>
             <button type="button" id="btn-download-hwp">HWP 다운로드</button>
-            <button type="button" id="btn-print">PDF로 저장 / 인쇄</button>
+            <button type="button" id="btn-print">PDF / 인쇄</button>
             <button type="button" id="btn-share-url" title="현재 입력값이 미리 채워진 URL 을 클립보드에 복사 (값은 서버로 전송되지 않습니다)">URL 공유</button>
             <button type="button" id="btn-reset">초기화</button>
           </div>

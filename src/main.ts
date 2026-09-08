@@ -1,3 +1,4 @@
+import { setupFormTabs } from './form-tabs';
 import { applyExpenseFields, removeFareRows } from './expense-fields';
 import { getCellRegions, invalidateCellRegions } from './cell-fields';
 import { loadTemplate } from './template-loader';
@@ -786,6 +787,7 @@ async function initialize(): Promise<void> {
   setStatus('양식 엔진 초기화 중...');
   registerFontFaces();
   setupPanelToggle();
+  setupFormTabs(formEl);
   const restoredFormState = restoreFormState();
   // URL 쿼리스트링은 localStorage 복원본보다 우선한다 — 공유받은 URL 의 의도를 존중.
   const urlFormApplied = applyUrlFormValuesToInputs();

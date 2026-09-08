@@ -1,3 +1,4 @@
+import { repairDeletedTableLayout } from '../../hwp-table-layout-patch';
 import init, { HwpDocument, version } from '@wasm/rhwp.js';
 import type { DocumentInfo, PageInfo, PageDef, SectionDef, CursorRect, HitTestResult, BodyFootnoteMarkerHit, FootnoteAtCursorResult, DeleteFootnoteResult, LineInfo, TableDimensions, CellInfo, CellBbox, CellProperties, TableProperties, DocumentPosition, MoveVerticalResult, SelectionRect, CharProperties, ParaProperties, CellPathEntry, NavContextEntry, FieldInfoResult, BookmarkInfo } from './types';
 
@@ -720,7 +721,18 @@ export class WasmBridge {
 
   deleteTableRow(sec: number, parentPara: number, controlIdx: number, rowIdx: number): { ok: boolean; rowCount: number; colCount: number } {
     if (!this.doc) throw new Error('문서가 로드되지 않았습니다');
-    return JSON.parse(this.doc.deleteTableRow(sec, parentPara, controlIdx, rowIdx));
+    const original = this.doc.exportHwp();
+    const result = JSON.parse(this.doc.deleteTableRow(sec, parentPara, controlIdx, rowIdx));
+    if (result.ok) {
+      try {
+        const repaired = repairDeletedTableLayout(original, this.doc.exportHwp(), sec, parentPara, controlIdx);
+        this.loadDocument(repaired, this._fileName);
+      } catch (error) {
+        this.loadDocument(original, this._fileName);
+        throw error;
+      }
+    }
+    return result;
   }
 
   deleteTableColumn(sec: number, parentPara: number, controlIdx: number, colIdx: number): { ok: boolean; rowCount: number; colCount: number } {

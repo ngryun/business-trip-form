@@ -1298,3 +1298,43 @@ html, body {
   .datetime-picker__inputs input { font-size: 16px; min-height: 44px; }
   .date-range-shortcuts button, .field-popover__presets .field-popover__recent-chip { min-height: 40px; }
 }
+
+/* 입력 구역만 스크롤하고 탭과 출력 버튼은 항상 노출한다. */
+.form-pane { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+#trip-form { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.form-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 12px 12px 8px; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
+.form-tabs button { min-height: 40px; border: 0; border-radius: 7px; background: #f1f5f9; color: #475569; font: inherit; font-size: 13px; cursor: pointer; }
+.form-tabs button[aria-selected="true"] { background: #2563eb; color: #fff; font-weight: 700; }
+.form-tabs button:focus-visible, .signature-details summary:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+.form-section-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 12px; }
+.form-tab-panel[hidden] { display: none; }
+.form-tab-panel:focus { outline: none; }
+.form-pane fieldset { margin-bottom: 10px; padding: 8px 10px; }
+.form-two-columns, [data-fare-inputs] { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 10px; }
+[data-fare-inputs][hidden] { display: none; }
+[data-fare-inputs] .field-hint { grid-column: 1 / -1; grid-row: 2; }
+.form-two-columns label, [data-fare-inputs] label { min-width: 0; }
+.form-pane input { min-width: 0; }
+.signature-details { border-top: 1px solid #e2e8f0; margin-top: 6px; padding-top: 6px; }
+.signature-details summary { color: #475569; font-size: 12px; padding: 6px 0; cursor: pointer; }
+.signature-details[open] summary { margin-bottom: 6px; }
+.form-pane .field-popover__range-field { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 6px; padding: 7px; }
+.form-pane .date-range-heading { font-size: 12px; margin: 0; }
+.form-pane .datetime-picker__inputs { gap: 6px; }
+.form-pane .datetime-picker__inputs label { font-size: 0; gap: 0; }
+.form-pane .datetime-picker__inputs input { font-size: 13px; padding: 6px; min-height: 38px; }
+.form-pane .date-range-shortcuts { gap: 4px; margin-top: 8px; }
+.form-pane .date-range-shortcuts button { font-size: 11px; padding: 4px 6px; }
+.form-pane .date-range-summary { margin-top: 8px; padding: 7px 8px; }
+.form-pane .actions { flex-shrink: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0; padding: 10px 12px; border-top: 1px solid #e2e8f0; background: #fff; box-shadow: 0 -3px 10px #0f172a06; }
+.form-pane .actions button { margin: 0; min-height: 34px; padding: 6px 8px; font-size: 12px; }
+@media (max-width: 800px) {
+  .app-body:not(.panel-collapsed) .form-pane { padding: 0; overflow: hidden; }
+  .form-pane .datetime-picker__inputs input { font-size: 16px; min-height: 44px; }
+  .form-pane .field-popover__range-field { grid-template-columns: 1fr; gap: 4px; }
+  .form-pane .actions button { min-height: 40px; }
+  .form-pane .actions .mobile-only { grid-column: 1 / -1; }
+}
+.form-pane .field-popover__presets > .field-popover__recent-label { display: none; }
+.form-pane .field-popover__presets { gap: 4px; }
+.form-pane .field-popover__presets .field-popover__recent-chip { padding-left: 8px; padding-right: 8px; font-size: 11px; }

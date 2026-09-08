@@ -105,7 +105,7 @@ function readHwpString(bytes: Uint8Array, offset: number, recordEnd: number): st
   return value;
 }
 
-class CompoundFile {
+export class CompoundFile {
   readonly bytes: Uint8Array;
   private readonly view: DataView;
   private readonly sectorSize: number;
