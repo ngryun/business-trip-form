@@ -5,7 +5,7 @@ import { discoverFields, fillDateTimeRange, removeDateTimeRangeSeparator, setFie
 import { downloadHwp } from './download';
 import { mountPreview, refreshPreview, reloadPreservingScroll, setPreviewReloadHook } from './preview';
 import { registerFontFaces, preloadFonts } from './fonts';
-import { attachInlineEditing } from './field-interaction';
+import { attachInlineEditing, type InlineEditHandle } from './field-interaction';
 import { buildDateTimeRangeChrome, showStampPopover, type FareDirection, type RangeChromeHandle } from './field-popover';
 import { setupDateTimePicker, type DateTimePickerController } from './datetime-picker';
 import { SignatureStampManager, type StoredSignatureStamp } from './signature-stamp';
@@ -45,6 +45,7 @@ const TEMPLATE_URL = `${import.meta.env.BASE_URL}templates/business-trip.hwp`;
 const FORM_STORAGE_KEY = 'business-trip-form:form-values:v1';
 const APPLICANT_STORAGE_KEY = 'business-trip-form:applicant-info:v1';
 const SIGNATURE_STORAGE_KEY = 'business-trip-form:signature-stamp:v1';
+const EDIT_HINTS_STORAGE_KEY = 'business-trip-form:edit-hints:v1';
 const APPLICANT_FIELDS = ['소속', '직급', '성명'] as const;
 const APPLICANT_DATALISTS: Record<ApplicantField, string> = {
   소속: 'applicant-org-options',
@@ -58,6 +59,7 @@ const formEl = document.getElementById('trip-form') as HTMLFormElement;
 const previewContainer = document.getElementById('scroll-container') as HTMLDivElement;
 const appBodyEl = document.querySelector('.app-body') as HTMLDivElement;
 const toggleBtn = document.getElementById('btn-toggle-panel') as HTMLButtonElement;
+const hintToggleBtn = document.getElementById('btn-toggle-hints') as HTMLButtonElement | null;
 const applicantSaveBtn = document.getElementById('btn-save-applicant') as HTMLButtonElement | null;
 const applicantClearBtn = document.getElementById('btn-clear-applicants') as HTMLButtonElement | null;
 const signatureInput = document.getElementById('signature-image') as HTMLInputElement | null;
@@ -82,6 +84,22 @@ let dateTimeRangeChrome: RangeChromeHandle | null = null;
 const autoTravelDates = new Map<string, string>();
 const autoReturnLocations = new Map<string, string>();
 let liveDateTimePreviewHandler: (() => void) | null = null;
+/** 인라인 편집 핸들 — 편집 가능 칸 마커 갱신/토글에 쓴다 (부착 전에는 null). */
+let inlineEdit: InlineEditHandle | null = null;
+
+/** "편집 가능 칸 표시" 설정 — 기본은 켜짐 (처음 쓰는 사람이 클릭할 자리를 알 수 있게) */
+function loadEditHintsPreference(): boolean {
+  try {
+    return localStorage.getItem(EDIT_HINTS_STORAGE_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+function applyEditHintsVisible(visible: boolean): void {
+  inlineEdit?.setHintsVisible(visible);
+  if (hintToggleBtn) hintToggleBtn.setAttribute('aria-pressed', visible ? 'true' : 'false');
+}
 
 interface PreviewApplyOptions {
   clearEmpty?: boolean;
@@ -938,7 +956,7 @@ async function initialize(): Promise<void> {
   });
 
   // 4) 인라인 편집 핸들러 부착 — 누름틀 + 일반 셀(식비·동승자·운임) + (인)/도장 영역
-  attachInlineEditing({
+  inlineEdit = attachInlineEditing({
     wasm,
     canvasView,
     container: previewContainer,
@@ -984,6 +1002,19 @@ async function initialize(): Promise<void> {
       saveFormState();
       setStatus(`"${label}" 항목을 반영했습니다.`);
     },
+  });
+
+  // 4-1) "편집 가능 칸 표시" 토글 — 미리보기에서 눌러 고칠 수 있는 칸을 사각형으로 보여준다
+  applyEditHintsVisible(loadEditHintsPreference());
+  hintToggleBtn?.addEventListener('click', () => {
+    const next = !(inlineEdit?.isHintsVisible() ?? true);
+    applyEditHintsVisible(next);
+    try {
+      localStorage.setItem(EDIT_HINTS_STORAGE_KEY, next ? '1' : '0');
+    } catch { /* 저장 실패는 무시 — 표시 자체는 이번 세션에 적용된다 */ }
+    setStatus(next
+      ? '미리보기에서 눌러 고칠 수 있는 칸을 표시합니다.'
+      : '편집 가능 칸 표시를 껐습니다.');
   });
 
   // 5) 액션 버튼 바인딩
@@ -1086,6 +1117,8 @@ async function initialize(): Promise<void> {
     if (realignSignatureStamp()) {
       reloadPreservingScroll(canvasView);
     }
+    // 편집 가능 칸 마커도 새 좌표로 다시 그린다 (초기화 전이면 부착 시 함께 그려진다)
+    inlineEdit?.refreshHints();
   }
 
   function realignSignatureStamp(): boolean {

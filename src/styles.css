@@ -652,6 +652,98 @@ html, body {
   z-index: 5;
 }
 
+/* 편집 가능 영역 안내 마커 — 미리보기에서 눌러 고칠 수 있는 칸을 항상 보여준다.
+   클릭은 캔버스로 통과해야 하므로 레이어·마커 모두 pointer-events: none. */
+.edit-hint-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.edit-hint {
+  position: absolute;
+  border-radius: 2px;
+  pointer-events: none;
+  animation: edit-hint-in 220ms ease-out both;
+}
+
+/* 값이 이미 채워진 칸 — 있다는 것만 알리고 문서 가독성을 해치지 않게 옅게 */
+.edit-hint--input {
+  border: 1px dashed rgba(37, 99, 235, 0.28);
+  background: rgba(37, 99, 235, 0.035);
+}
+
+/* 아직 비어 있는 칸 — 여기부터 채우라고 더 또렷하게 */
+.edit-hint--input.is-empty {
+  border: 1px dashed rgba(37, 99, 235, 0.62);
+  background: rgba(37, 99, 235, 0.10);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+}
+
+/* 클릭하면 입력창이 아니라 메뉴가 열리는 칸 (운임 행 삭제/복원 · 도장) */
+.edit-hint--menu {
+  border: 1px dashed rgba(202, 138, 4, 0.5);
+  background: rgba(250, 204, 21, 0.10);
+}
+
+/* 칸이 넉넉하면 연필/메뉴 표식을 얹어 "누르는 곳" 임을 분명히 한다 */
+.edit-hint::after {
+  position: absolute;
+  right: 2px;
+  bottom: 0;
+  font-size: 9px;
+  line-height: 1.2;
+  opacity: 0.75;
+}
+
+.edit-hint--input.is-empty::after { content: '✏'; color: #2563eb; }
+.edit-hint--menu::after { content: '⋯'; color: #a16207; font-size: 12px; }
+
+/* 좁은 칸에서는 표식이 글자를 가리므로 생략 */
+.edit-hint { container-type: inline-size; }
+@container (max-width: 26px) {
+  .edit-hint::after { content: none; }
+}
+
+@keyframes edit-hint-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edit-hint { animation: none; }
+}
+
+/* 미리보기 위에 떠 있는 "편집 가능 칸 표시" 토글 */
+.hint-toggle {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #334155;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(2px);
+}
+
+.hint-toggle:hover { background: #ffffff; border-color: #94a3b8; }
+
+.hint-toggle[aria-pressed="true"] {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
 /* CanvasView 가 left:50% + translateX(-50%) 로 페이지를 중앙 정렬하므로 absolute 필요 */
 #scroll-content canvas {
   position: absolute;
@@ -1129,6 +1221,7 @@ html, body {
 
 @media print {
   .app-header, .form-pane, .panel-toggle, .field-popover, .app-footer, .toast { display: none; }
+  .edit-hint-layer, .field-hover-highlight, .hint-toggle { display: none !important; }
   .app-body { grid-template-columns: 1fr; }
   .preview-pane { background: #ffffff; overflow: visible; }
   #scroll-container { overflow: visible; height: auto; }
