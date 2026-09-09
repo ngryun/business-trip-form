@@ -9,8 +9,9 @@
 <body>
   <div id="app">
     <header class="app-header">
-      <button type="button" id="btn-toggle-panel" class="panel-toggle" aria-label="입력 폼 펼치기/접기" title="입력 폼 펼치기/접기">
-        <span aria-hidden="true">☰</span>
+      <button type="button" id="btn-toggle-panel" class="panel-toggle" aria-expanded="true" aria-controls="form-pane">
+        <span class="panel-toggle__icon" aria-hidden="true">☰</span>
+        <span class="panel-toggle__label">입력 폼 접기</span>
       </button>
       <div class="header-text">
         <h1>여비정산신청서 작성</h1>
@@ -20,13 +21,13 @@
 
     <div class="app-body">
       <!-- 입력 폼 -->
-      <section class="form-pane" aria-label="입력 폼">
+      <section id="form-pane" class="form-pane" aria-label="입력 폼">
         <form id="trip-form" autocomplete="off">
           <div class="form-tabs" role="tablist" aria-label="입력 항목">
-            <button type="button" id="form-tab-basic" role="tab" aria-controls="form-panel-basic" aria-selected="true" tabindex="0" data-form-tab="basic">기본 정보</button>
-            <button type="button" id="form-tab-fare" role="tab" aria-controls="form-panel-fare" aria-selected="false" tabindex="-1" data-form-tab="fare">운임</button>
-            <button type="button" id="form-tab-passengers" role="tab" aria-controls="form-panel-passengers" aria-selected="false" tabindex="-1" data-form-tab="passengers">동승자</button>
-            <button type="button" id="form-tab-submit" role="tab" aria-controls="form-panel-submit" aria-selected="false" tabindex="-1" data-form-tab="submit">제출</button>
+            <button type="button" id="form-tab-basic" role="tab" aria-controls="form-panel-basic" aria-selected="true" tabindex="0" data-form-tab="basic"><span class="form-tab__label">기본 정보</span><span class="form-tab__badge" hidden></span></button>
+            <button type="button" id="form-tab-fare" role="tab" aria-controls="form-panel-fare" aria-selected="false" tabindex="-1" data-form-tab="fare"><span class="form-tab__label">운임</span><span class="form-tab__badge" hidden></span></button>
+            <button type="button" id="form-tab-passengers" role="tab" aria-controls="form-panel-passengers" aria-selected="false" tabindex="-1" data-form-tab="passengers"><span class="form-tab__label">동승자</span><span class="form-tab__badge" hidden></span></button>
+            <button type="button" id="form-tab-submit" role="tab" aria-controls="form-panel-submit" aria-selected="false" tabindex="-1" data-form-tab="submit"><span class="form-tab__label">제출</span><span class="form-tab__badge" hidden></span></button>
           </div>
           <div class="form-section-scroll">
           <div id="form-panel-basic" class="form-tab-panel" role="tabpanel" aria-labelledby="form-tab-basic" tabindex="0">
@@ -34,7 +35,7 @@
             <legend class="applicant-legend">
               <span>신청자 정보</span>
               <button type="button" id="btn-save-applicant" class="applicant-legend-button" title="브라우저에만 저장됩니다">저장</button>
-              <button type="button" id="btn-clear-applicants" class="applicant-legend-button applicant-legend-button--danger">전체 삭제</button>
+              <button type="button" id="btn-clear-applicants" class="applicant-legend-button applicant-legend-button--danger" title="브라우저에 저장된 신청자 목록을 삭제합니다 (입력 중인 값은 그대로)" hidden>저장 목록 삭제</button>
             </legend>
             <label>소속 <input name="소속" type="text" list="applicant-org-options" autocomplete="organization" required /></label>
             <div class="form-two-columns">
@@ -72,10 +73,10 @@
             <div class="field-label">날짜 직접 입력 또는 달력 선택 · 시간은 10분 단위</div>
             <div class="datetime-range" id="datetime-range">
               <span class="datetime-picker" data-datetime-picker="시작일시" data-datetime-default-hour="09">
-                <input name="시작일시" type="hidden" />
+                <input name="시작일시" type="hidden" data-required-label="출장 시작 일시" />
               </span>
               <span class="datetime-picker" data-datetime-picker="종료일시" data-datetime-default-hour="18">
-                <input name="종료일시" type="hidden" />
+                <input name="종료일시" type="hidden" data-required-label="출장 종료 일시" />
               </span>
             </div>
             <label>출장지 <input name="출장지" type="text" required /></label>
@@ -87,15 +88,16 @@
           </fieldset>
           </div>
           <div id="form-panel-fare" class="form-tab-panel" role="tabpanel" aria-labelledby="form-tab-fare" tabindex="0" hidden>
+          <p class="field-hint field-hint--panel">일자는 출장 일시에서 자동 입력되며 직접 수정할 수 있습니다. 출발지·도착지는 갈 때 값이 올 때에 거꾸로 채워집니다.</p>
           <fieldset>
             <legend>갈 때 운임 <button type="button" data-fare-toggle="갈때" class="fare-toggle" aria-label="갈 때 운임 행 삭제">행 삭제</button></legend>
             <input type="hidden" name="갈때운임삭제" value="0" />
             <div data-fare-inputs="갈때">
             <label>일자 <input name="갈때일자" type="date" required /></label>
-            <p class="field-hint">출장 일시에서 자동 입력되며 직접 수정할 수 있습니다.</p>
             <label>교통편
-              <input name="갈때교통편" type="text" list="transport-options" placeholder="선택 또는 직접 입력" required />
+              <input name="갈때교통편" type="text" placeholder="직접 입력" required />
             </label>
+            <span class="transport-presets" data-transport-presets="갈때" aria-label="교통편 빠른 선택"></span>
             <label>출발지 <input name="갈때출발지" type="text" required /></label>
             <label>도착지 <input name="갈때도착지" type="text" required /></label>
             </div>
@@ -106,23 +108,14 @@
             <input type="hidden" name="올때운임삭제" value="0" />
             <div data-fare-inputs="올때">
             <label>일자 <input name="올때일자" type="date" required /></label>
-            <p class="field-hint">출장 일시에서 자동 입력되며 직접 수정할 수 있습니다.</p>
             <label>교통편
-              <input name="올때교통편" type="text" list="transport-options" placeholder="선택 또는 직접 입력" required />
+              <input name="올때교통편" type="text" placeholder="직접 입력" required />
             </label>
+            <span class="transport-presets" data-transport-presets="올때" aria-label="교통편 빠른 선택"></span>
             <label>출발지 <input name="올때출발지" type="text" required /></label>
             <label>도착지 <input name="올때도착지" type="text" required /></label>
             </div>
           </fieldset>
-
-          <datalist id="transport-options">
-            <option>자가용</option>
-            <option>버스</option>
-            <option>기차/KTX</option>
-            <option>항공</option>
-            <option>지하철</option>
-            <option>택시</option>
-          </datalist>
 
           </div>
           <div id="form-panel-passengers" class="form-tab-panel" role="tabpanel" aria-labelledby="form-tab-passengers" tabindex="0" hidden>
@@ -151,7 +144,7 @@
           </div>
           <div id="form-panel-submit" class="form-tab-panel" role="tabpanel" aria-labelledby="form-tab-submit" tabindex="0" hidden>
           <fieldset>
-            <legend>기타</legend>
+            <legend>제출 정보</legend>
             <label>제출 날짜 <span class="date-with-action"><input name="제출날짜" type="date" required /><button type="button" id="btn-submit-today">오늘</button></span></label>
             <label>첨부서류 (텍스트)
               <span id="attachment-presets" class="attachment-presets" aria-label="자주 쓰는 첨부서류"></span>
@@ -166,7 +159,7 @@
             <button type="button" id="btn-download-hwp">HWP 다운로드</button>
             <button type="button" id="btn-print">PDF / 인쇄</button>
             <button type="button" id="btn-share-url" title="현재 입력값이 미리 채워진 URL 을 클립보드에 복사 (값은 서버로 전송되지 않습니다)">URL 공유</button>
-            <button type="button" id="btn-reset">초기화</button>
+            <button type="button" id="btn-reset" class="actions__ghost" title="모든 입력과 임시 저장 내용을 지웁니다">초기화</button>
           </div>
         </form>
       </section>

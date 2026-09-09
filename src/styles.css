@@ -32,9 +32,10 @@ html, body {
 
 .panel-toggle {
   flex: 0 0 auto;
-  width: 36px;
+  min-width: 36px;
   height: 36px;
-  font-size: 18px;
+  padding: 0 10px 0 8px;
+  gap: 6px;
   line-height: 1;
   display: inline-flex;
   align-items: center;
@@ -43,9 +44,21 @@ html, body {
   color: #f9fafb;
   border: 1px solid #4b5563;
   border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
 }
+.panel-toggle__icon { font-size: 18px; }
 .panel-toggle:hover { background: #4b5563; }
+/* 접힌 상태 — 폼을 다시 열 단서가 이 버튼 하나이므로 파란색으로 눈에 띄게 */
+.panel-toggle[aria-expanded="false"] {
+  background: #2563eb;
+  border-color: #1d4ed8;
+}
+.panel-toggle[aria-expanded="false"]:hover { background: #1d4ed8; }
+.panel-toggle:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
 
 .app-body {
   flex: 1;
@@ -798,7 +811,8 @@ html, body {
   /* 헤더 압축 — 부제목을 숨겨 작은 화면의 세로 공간을 확보 */
   .app-header { padding: 8px 12px; }
   .app-header .subtitle { display: none; }
-  .panel-toggle { width: 40px; height: 40px; }
+  .panel-toggle { width: 40px; height: 40px; padding: 0; }
+  .panel-toggle__label { display: none; }
 
   /* 푸터는 한 줄로 — 줄바꿈으로 두 줄을 차지하지 않게 */
   .app-footer {
@@ -1305,6 +1319,15 @@ html, body {
 .form-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 12px 12px 8px; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
 .form-tabs button { min-height: 40px; border: 0; border-radius: 7px; background: #f1f5f9; color: #475569; font: inherit; font-size: 13px; cursor: pointer; }
 .form-tabs button[aria-selected="true"] { background: #2563eb; color: #fff; font-weight: 700; }
+.form-tabs button { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+/* 미입력 필수칸 개수 배지 — 탭을 열지 않아도 어디가 비었는지 보이게 */
+.form-tab__badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
+  background: #f59e0b; color: #1f2937; font-size: 11px; font-weight: 700; line-height: 1;
+}
+.form-tab__badge[hidden] { display: none; }
+.form-tabs button[aria-selected="true"] .form-tab__badge { background: #fef3c7; }
 .form-tabs button:focus-visible, .signature-details summary:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
 .form-section-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 12px; }
 .form-tab-panel[hidden] { display: none; }
@@ -1312,7 +1335,9 @@ html, body {
 .form-pane fieldset { margin-bottom: 10px; padding: 8px 10px; }
 .form-two-columns, [data-fare-inputs] { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 10px; }
 [data-fare-inputs][hidden] { display: none; }
-[data-fare-inputs] .field-hint { grid-column: 1 / -1; grid-row: 2; }
+.transport-presets { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px; margin: -2px 0 10px; }
+.transport-presets .attachment-preset-chip { padding: 4px 10px; font-size: 11px; }
+.field-hint--panel { margin: 0 2px 10px; }
 .form-two-columns label, [data-fare-inputs] label { min-width: 0; }
 .form-pane input { min-width: 0; }
 .signature-details { border-top: 1px solid #e2e8f0; margin-top: 6px; padding-top: 6px; }
@@ -1328,6 +1353,10 @@ html, body {
 .form-pane .date-range-summary { margin-top: 8px; padding: 7px 8px; }
 .form-pane .actions { flex-shrink: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0; padding: 10px 12px; border-top: 1px solid #e2e8f0; background: #fff; box-shadow: 0 -3px 10px #0f172a06; }
 .form-pane .actions button { margin: 0; min-height: 34px; padding: 6px 8px; font-size: 12px; }
+/* 초기화 — 파괴적 동작은 다른 출력 버튼과 같은 무게로 보이지 않게 테두리 없는 텍스트 버튼으로 */
+.actions .actions__ghost { border-color: transparent; background: transparent; color: #6b7280; }
+.actions .actions__ghost:hover { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+.actions .actions__ghost:focus-visible { outline: 2px solid #2563eb; outline-offset: -1px; }
 @media (max-width: 800px) {
   .app-body:not(.panel-collapsed) .form-pane { padding: 0; overflow: hidden; }
   .form-pane .datetime-picker__inputs input { font-size: 16px; min-height: 44px; }

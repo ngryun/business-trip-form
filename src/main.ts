@@ -23,6 +23,7 @@ import {
 import {
   ATTACHMENT_PRESETS,
   FIELD_CONFIGS,
+  TRANSPORT_OPTIONS,
   formatDateKR,
   formatDateTimeRange,
   hasListItem,
@@ -172,6 +173,8 @@ function collectFormValues(): Record<string, string> {
 function setupLocalFormPersistence(): void {
   formEl.addEventListener('input', saveFormState);
   formEl.addEventListener('change', saveFormState);
+  formEl.addEventListener('input', updateRequiredBadges);
+  formEl.addEventListener('change', updateRequiredBadges);
 }
 
 /** 첨부서류 입력 동기화용 — 인라인 편집 등으로 값이 바뀌었을 때 칩 활성 상태를 맞춘다. */
@@ -209,6 +212,137 @@ function setupAttachmentPresets(): void {
   textarea.addEventListener('input', sync);
   syncAttachmentPresetChips = sync;
   sync();
+}
+
+/** 운임 탭 교통편 빠른 선택 칩 — 미리보기 팝오버의 선택지와 같은 목록을 쓴다. */
+let syncTransportPresetChips: (() => void) | null = null;
+
+function setupTransportPresets(): void {
+  const groups: Array<{ input: HTMLInputElement; chips: HTMLButtonElement[] }> = [];
+  formEl.querySelectorAll<HTMLElement>('[data-transport-presets]').forEach((wrap) => {
+    const direction = wrap.dataset.transportPresets ?? '';
+    const input = formEl.elements.namedItem(`${direction}교통편`);
+    if (!(input instanceof HTMLInputElement)) return;
+    const chips = TRANSPORT_OPTIONS.map((option) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'attachment-preset-chip';
+      btn.textContent = option;
+      btn.setAttribute('aria-pressed', 'false');
+      btn.addEventListener('click', () => {
+        // 같은 칩을 다시 누르면 비운다 (첨부서류 칩과 같은 토글 감각)
+        input.value = input.value === option ? '' : option;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        sync();
+      });
+      wrap.appendChild(btn);
+      return btn;
+    });
+    groups.push({ input, chips });
+    input.addEventListener('input', sync);
+  });
+
+  function sync(): void {
+    for (const { input, chips } of groups) {
+      for (const chip of chips) {
+        const active = chip.textContent === input.value.trim();
+        chip.classList.toggle('is-active', active);
+        chip.setAttribute('aria-pressed', String(active));
+      }
+    }
+  }
+  syncTransportPresetChips = sync;
+  sync();
+}
+
+/**
+ * 비어 있는 필수 항목 — 표시 중이고 활성화된 입력만 센다 (운임 행을 삭제하면 그 행의 칸은 제외).
+ * 출장 일시처럼 hidden input 으로만 존재하는 항목은 data-required-label 로 필수임을 표시한다.
+ */
+interface MissingRequiredField {
+  control: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+  label: string;
+  panel: HTMLElement | null;
+}
+
+function findMissingRequired(): MissingRequiredField[] {
+  const missing: MissingRequiredField[] = [];
+  for (const el of Array.from(formEl.elements)) {
+    if (
+      !(el instanceof HTMLInputElement) &&
+      !(el instanceof HTMLTextAreaElement) &&
+      !(el instanceof HTMLSelectElement)
+    ) continue;
+    const explicitLabel = el.dataset.requiredLabel;
+    if (!el.required && !explicitLabel) continue;
+    if (el.disabled || el.closest('[hidden]:not(.form-tab-panel)')) continue;
+    if (el.value.trim()) continue;
+    missing.push({
+      control: el,
+      label: explicitLabel ?? describeRequiredControl(el),
+      panel: el.closest<HTMLElement>('.form-tab-panel'),
+    });
+  }
+  return missing;
+}
+
+function describeRequiredControl(el: HTMLElement): string {
+  const labelText = el.closest('label')?.firstChild?.textContent?.trim() ?? '';
+  const fare = el.closest<HTMLElement>('[data-fare-inputs]')?.dataset.fareInputs;
+  const prefix = fare === '갈때' ? '갈 때 ' : fare === '올때' ? '올 때 ' : '';
+  return `${prefix}${labelText || (el as HTMLInputElement).name}`;
+}
+
+/** 탭 버튼의 미입력 배지를 갱신한다. */
+function updateRequiredBadges(): void {
+  const counts = new Map<string, number>();
+  for (const item of findMissingRequired()) {
+    if (!item.panel) continue;
+    counts.set(item.panel.id, (counts.get(item.panel.id) ?? 0) + 1);
+  }
+  formEl.querySelectorAll<HTMLButtonElement>('[data-form-tab]').forEach((tab) => {
+    const badge = tab.querySelector<HTMLElement>('.form-tab__badge');
+    const name = tab.querySelector('.form-tab__label')?.textContent ?? tab.textContent ?? '';
+    const count = counts.get(tab.getAttribute('aria-controls') ?? '') ?? 0;
+    if (badge) {
+      badge.textContent = String(count);
+      badge.hidden = count === 0;
+    }
+    tab.setAttribute('aria-label', count > 0 ? `${name}, 미입력 ${count}개` : name);
+  });
+}
+
+/** 미리보기의 첫 빈 필수칸으로 이동 — 해당 탭을 열고 폼 패널을 펼친 뒤 포커스한다. */
+function focusMissingRequired(item: MissingRequiredField): void {
+  appBodyEl.classList.remove('panel-collapsed');
+  syncPanelToggleState();
+  const tab = item.panel
+    ? formEl.querySelector<HTMLButtonElement>(`[data-form-tab][aria-controls="${item.panel.id}"]`)
+    : null;
+  tab?.click();
+  const target = item.control.type === 'hidden'
+    ? item.control.closest<HTMLElement>('.datetime-picker')?.querySelector<HTMLInputElement>('input:not([type="hidden"])')
+    : item.control;
+  target?.focus();
+  target?.scrollIntoView({ block: 'center' });
+}
+
+/**
+ * 출력(HWP/PDF) 전에 빈 필수칸을 알린다. 의도적으로 비워 두는 경우가 있으므로 막지는 않고,
+ * 그대로 진행할지 묻는다 — 취소하면 첫 빈칸으로 이동한다.
+ */
+function confirmMissingRequired(actionLabel: string): boolean {
+  const missing = findMissingRequired();
+  if (missing.length === 0) return true;
+  const names = missing.map((item) => item.label);
+  const shown = names.slice(0, 6).join(', ') + (names.length > 6 ? ` 외 ${names.length - 6}개` : '');
+  const ok = window.confirm(`필수 항목 ${missing.length}개가 비어 있습니다.\n${shown}\n\n그대로 ${actionLabel}할까요?`);
+  if (!ok) {
+    focusMissingRequired(missing[0]);
+    setStatus(`빈 항목부터 채워 주세요: ${missing[0].label}`);
+  }
+  return ok;
 }
 
 function setupApplicantInfoStorage(): void {
@@ -292,6 +426,8 @@ function normalizeApplicantInfo(raw: unknown): SavedApplicantInfo | null {
 }
 
 function refreshApplicantDatalists(applicants = loadApplicantInfos()): void {
+  // 지울 목록이 없으면 파괴적 버튼을 아예 보이지 않게 한다
+  if (applicantClearBtn) applicantClearBtn.hidden = applicants.length === 0;
   for (const field of APPLICANT_FIELDS) {
     const datalist = document.getElementById(APPLICANT_DATALISTS[field]) as HTMLDataListElement | null;
     if (!datalist) continue;
@@ -490,6 +626,7 @@ function syncFormFromInline(label: string, hwpValue: string): void {
   if (cfg.type === 'date') setFormControlValue(input, parseDateKR(hwpValue));
   else setFormControlValue(input, hwpValue);
   if (label === '첨부서류') syncAttachmentPresetChips?.();
+  if (label.endsWith('교통편')) syncTransportPresetChips?.();
 }
 
 function setFormControlValue(
@@ -540,11 +677,20 @@ function ensureSelectOption(select: HTMLSelectElement, value: string): void {
   select.appendChild(option);
 }
 
+/** ☰ 버튼이 현재 상태(펼침/접힘)를 라벨과 aria 로 함께 드러내게 한다. */
+function syncPanelToggleState(): void {
+  const expanded = !appBodyEl.classList.contains('panel-collapsed');
+  toggleBtn.setAttribute('aria-expanded', String(expanded));
+  const label = expanded ? '입력 폼 접기' : '입력 폼 열기';
+  toggleBtn.title = label;
+  toggleBtn.setAttribute('aria-label', label);
+  const labelEl = toggleBtn.querySelector('.panel-toggle__label');
+  if (labelEl) labelEl.textContent = label;
+}
+
 function setupPanelToggle(): void {
   const mobileQuery = window.matchMedia('(max-width: 800px)');
-  const syncAria = (): void => {
-    toggleBtn.setAttribute('aria-expanded', String(!appBodyEl.classList.contains('panel-collapsed')));
-  };
+  const syncAria = syncPanelToggleState;
   // 모바일은 기본 접힘 (미리보기 우선), 데스크톱은 기본 펼침
   if (mobileQuery.matches) appBodyEl.classList.add('panel-collapsed');
   // 창 크기 변경/기기 회전으로 모바일 ↔ 데스크톱이 바뀌면 그 시점의 기본 상태로 보정
@@ -724,6 +870,7 @@ function syncFareRowControls(): void {
     button.textContent = deleted ? '행 복원' : '행 삭제';
     button.setAttribute('aria-label', `${direction === '갈때' ? '갈 때' : '올 때'} 운임 ${deleted ? '행 복원' : '행 삭제'}`);
   }
+  updateRequiredBadges();
 }
 
 /** 운임 행 삭제 상태를 토글한다 — 사이드패널 버튼과 미리보기 팝오버가 함께 쓴다. */
@@ -796,7 +943,9 @@ async function initialize(): Promise<void> {
   setupDateTimeControls();
   setupReturnLocationDefaults();
   setupAttachmentPresets();
+  setupTransportPresets();
   setupLocalFormPersistence();
+  updateRequiredBadges();
   document.getElementById('btn-submit-today')?.addEventListener('click', () => {
     const input = formEl.elements.namedItem('제출날짜') as HTMLInputElement;
     input.value = todayDateValue();
@@ -1170,13 +1319,13 @@ async function initialize(): Promise<void> {
   document.getElementById('btn-show-preview')?.addEventListener('click', () => {
     pushRecentValuesFromForm();
     appBodyEl.classList.add('panel-collapsed');
-    toggleBtn.setAttribute('aria-expanded', 'false');
+    syncPanelToggleState();
   });
 
   // 모바일 하단 툴바 — 폼을 열지 않고도 입력/저장을 바로 시작
   document.getElementById('btn-mobile-edit')?.addEventListener('click', () => {
     appBodyEl.classList.remove('panel-collapsed');
-    toggleBtn.setAttribute('aria-expanded', 'true');
+    syncPanelToggleState();
   });
   document.getElementById('btn-mobile-hwp')?.addEventListener('click', () => {
     document.getElementById('btn-download-hwp')?.click();
@@ -1199,6 +1348,7 @@ async function initialize(): Promise<void> {
   });
 
   document.getElementById('btn-download-hwp')!.addEventListener('click', async () => {
+    if (!confirmMissingRequired('저장')) return;
     try {
       window.clearTimeout(livePreviewTimer);
       applyCollectedValuesToPreview(undefined, { clearEmpty: true });
@@ -1215,6 +1365,7 @@ async function initialize(): Promise<void> {
 
   document.getElementById('btn-print')!.addEventListener('click', async () => {
     const btn = document.getElementById('btn-print') as HTMLButtonElement;
+    if (!confirmMissingRequired('출력')) return;
     btn.disabled = true;
     try {
       window.clearTimeout(livePreviewTimer);
@@ -1273,6 +1424,8 @@ async function initialize(): Promise<void> {
     setDefaultSubmitDate();
     if (signatureInput) signatureInput.value = '';
     updateSignatureButtons();
+    syncTransportPresetChips?.();
+    updateRequiredBadges();
     try {
       applyCollectedValuesToPreview(undefined, { clearEmpty: true });
     } catch (err) {
