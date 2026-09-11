@@ -33,6 +33,11 @@ export interface PopoverArgs {
   placeholder?: string;
   /** 최근에 같은 라벨에 입력했던 원시 값 목록 (date 는 `YYYY-MM-DD`). 비우면 표시 안 함. */
   recentValues?: string[];
+  /**
+   * 한 번 클릭으로 채워 넣을 제안 값 (예: 동승자 소속 ← 신청인 소속).
+   * 최근 입력 칩과 같은 모양이고, 앞쪽에 다른 이름표를 달아 구분한다.
+   */
+  suggestions?: { label: string; values: string[] };
   onConfirm: (value: string) => void;
   onCancel: () => void;
   onNext?: (value: string) => void;
@@ -106,12 +111,26 @@ export function showFieldPopover(args: PopoverArgs): void {
     input.placeholder = args.placeholder;
   }
 
-  // 최근 입력 칩: 같은 라벨에 이전에 넣었던 값을 한 번 클릭으로 채워 넣고 바로 확정한다.
-  const recentChips = buildRecentChips(cfg, args.recentValues ?? [], args.initialValue, (raw) => {
+  // 칩 클릭은 그 값으로 곧장 반영하기로 설계 — 사용자가 "확인" 한 번 더 누를 필요 없이 종료.
+  const pickChip = (raw: string): void => {
     fillInputValue(input, cfg, raw);
-    // 칩 클릭은 그 값으로 곧장 반영하기로 설계 — 사용자가 "확인" 한 번 더 누를 필요 없이 종료.
     finish('confirm');
-  });
+  };
+
+  // 제안 칩: 대개 정해져 있는 값(동승자 소속 ← 신청인 소속)을 한 번 클릭으로 넣는다.
+  if (args.suggestions) {
+    const suggestionChips = buildRecentChips(
+      cfg,
+      args.suggestions.values,
+      args.initialValue,
+      pickChip,
+      args.suggestions.label,
+    );
+    if (suggestionChips) root.appendChild(suggestionChips);
+  }
+
+  // 최근 입력 칩: 같은 라벨에 이전에 넣었던 값을 한 번 클릭으로 채워 넣는다.
+  const recentChips = buildRecentChips(cfg, args.recentValues ?? [], args.initialValue, pickChip);
   if (recentChips) root.appendChild(recentChips);
 
   // 첨부서류 자주 쓰는 항목 — 토글로 조합한 뒤 확인으로 반영 (최근 칩과 달리 즉시 확정하지 않음)
@@ -666,6 +685,7 @@ function buildRecentChips(
   values: string[],
   initial: string,
   onPick: (raw: string) => void,
+  heading = '최근',
 ): HTMLElement | null {
   // 칩으로 노출할 가치가 있는 위젯 타입만 처리한다. select 는 이미 옵션 버튼이 있고,
   // datetime 은 매번 다른 일시라 도움이 적다.
@@ -677,10 +697,10 @@ function buildRecentChips(
 
   const wrap = document.createElement('div');
   wrap.className = 'field-popover__recent';
-  const heading = document.createElement('span');
-  heading.className = 'field-popover__recent-label';
-  heading.textContent = '최근';
-  wrap.appendChild(heading);
+  const headingEl = document.createElement('span');
+  headingEl.className = 'field-popover__recent-label';
+  headingEl.textContent = heading;
+  wrap.appendChild(headingEl);
 
   for (const value of list) {
     const chip = document.createElement('button');

@@ -172,6 +172,9 @@ function collectFormValues(): Record<string, string> {
 function setupLocalFormPersistence(): void {
   formEl.addEventListener('input', saveFormState);
   formEl.addEventListener('change', saveFormState);
+  // 신청인 소속이 채워지면 동승자 「같음」 버튼도 함께 쓸 수 있게 된다.
+  formEl.addEventListener('input', () => syncPassengerOrgButtons?.());
+  formEl.addEventListener('change', () => syncPassengerOrgButtons?.());
 }
 
 /** 첨부서류 입력 동기화용 — 인라인 편집 등으로 값이 바뀌었을 때 칩 활성 상태를 맞춘다. */
@@ -490,6 +493,8 @@ function syncFormFromInline(label: string, hwpValue: string): void {
   if (cfg.type === 'date') setFormControlValue(input, parseDateKR(hwpValue));
   else setFormControlValue(input, hwpValue);
   if (label === '첨부서류') syncAttachmentPresetChips?.();
+  // 미리보기에서 소속을 고쳤으면 동승자 「같음」 버튼도 다시 쓸 수 있게 된다
+  if (label === '소속') syncPassengerOrgButtons?.();
 }
 
 function setFormControlValue(
@@ -774,6 +779,51 @@ function setFormFieldValue(name: string, value: string): boolean {
   return true;
 }
 
+const PASSENGER_ORG_KEY = /^동승자([1-4])소속$/;
+
+/**
+ * 동승자 소속은 신청인과 같은 학교인 경우가 대부분이라, 매번 학교 이름을 다시 치지 않게
+ * "신청인 소속" 을 한 번 클릭으로 넣을 수 있게 한다.
+ * 사이드패널의 「같음」 버튼과 미리보기 팝오버의 칩이 이 값을 함께 쓴다.
+ */
+function getPassengerOrgSuggestion(key: string): { label: string; values: string[] } | null {
+  if (!PASSENGER_ORG_KEY.test(key)) return null;
+  const org = getFormFieldValue('소속').trim();
+  if (!org) return null;
+  return { label: '신청인 소속', values: [org] };
+}
+
+/** 동승자 소속 칸 옆 「같음」 버튼 상태를 신청인 소속 유무에 맞춘다 (setup 후에 채워진다). */
+let syncPassengerOrgButtons: (() => void) | null = null;
+
+function setupPassengerOrgShortcuts(): void {
+  const buttons = [...formEl.querySelectorAll<HTMLButtonElement>('[data-same-org]')];
+  if (buttons.length === 0) return;
+
+  for (const button of buttons) {
+    button.addEventListener('click', () => {
+      const org = getFormFieldValue('소속').trim();
+      if (!org) return;
+      const index = button.dataset.sameOrg;
+      setFormFieldValue(`동승자${index}소속`, org);
+      // 학교 이름에 조사(으로/로)를 붙이면 받침에 따라 어색해지므로 값 없이 문장을 맺는다
+      setStatus(`동승자 ${index} 소속을 신청인 소속과 같게 채웠습니다.`);
+    });
+  }
+
+  syncPassengerOrgButtons = (): void => {
+    const org = getFormFieldValue('소속').trim();
+    for (const button of buttons) {
+      button.disabled = !org;
+      // 조사(을/를)는 학교 이름의 받침에 따라 달라지므로 붙이지 않는다
+      button.title = org
+        ? `신청인 소속과 같게 채우기: "${org}"`
+        : '신청자 정보의 소속을 먼저 입력하세요';
+    }
+  };
+  syncPassengerOrgButtons();
+}
+
 function setupFareRowControls(): void {
   syncFareRowControls();
   formEl.querySelectorAll<HTMLButtonElement>('[data-fare-toggle]').forEach((button) => {
@@ -796,6 +846,7 @@ async function initialize(): Promise<void> {
   setupDateTimeControls();
   setupReturnLocationDefaults();
   setupAttachmentPresets();
+  setupPassengerOrgShortcuts();
   setupLocalFormPersistence();
   document.getElementById('btn-submit-today')?.addEventListener('click', () => {
     const input = formEl.elements.namedItem('제출날짜') as HTMLInputElement;
@@ -966,6 +1017,7 @@ async function initialize(): Promise<void> {
     cells: {
       getRegions: () => getCellRegions(wasm),
       getValue: (key) => getFormFieldValue(key),
+      getSuggestions: (key) => getPassengerOrgSuggestion(key),
       commit: (key, value) => {
         if (!setFormFieldValue(key, value)) return;
         setStatus(value ? `"${value}" 을(를) 반영했습니다.` : '해당 칸을 비웠습니다.');
@@ -1264,6 +1316,7 @@ async function initialize(): Promise<void> {
       (formEl.elements.namedItem(`${direction}운임삭제`) as HTMLInputElement).value = '0';
     }
     syncFareRowControls();
+    syncPassengerOrgButtons?.();
     autoTravelDates.clear();
     autoReturnLocations.clear();
     clearSavedFormState();

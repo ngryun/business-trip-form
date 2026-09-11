@@ -1291,10 +1291,22 @@ html, body {
 .field-hint { font-size: 11px; color: #64748b; line-height: 1.5; margin: -2px 0 8px; }
 .passenger-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
 .passenger-row label, .passenger-row input { min-width: 0; }
+/* 동승자 소속 = 신청인 소속 (대부분 같은 학교) 을 한 번 클릭으로 넣는 버튼.
+   입력창 폭을 잃지 않도록 라벨 줄에 올린다. */
+.same-org-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.same-org-button {
+  flex-shrink: 0; min-height: 22px; padding: 1px 7px;
+  border: 1px solid #cbd5e1; border-radius: 999px; background: #fff;
+  color: #475569; font: inherit; font-size: 11px; line-height: 1.5; white-space: nowrap; cursor: pointer;
+}
+.same-org-button:hover:not(:disabled) { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; }
+.same-org-button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+.same-org-button:disabled { opacity: 0.45; cursor: not-allowed; }
 .date-with-action { display: flex; align-items: center; gap: 6px; }
 .date-with-action input { flex: 1; min-width: 0; }
 .date-with-action button { flex-shrink: 0; margin-top: 4px; min-height: 34px; }
 @media (max-width: 800px) {
+  .same-org-button { min-height: 30px; padding: 4px 10px; font-size: 12px; }
   .datetime-picker__inputs input { font-size: 16px; min-height: 44px; }
   .date-range-shortcuts button, .field-popover__presets .field-popover__recent-chip { min-height: 40px; }
 }

@@ -52,6 +52,8 @@ export interface InlineEditDeps {
     getRegions: () => CellRegion[];
     /** 셀에 대응하는 폼 입력값 */
     getValue: (key: string) => string;
+    /** 한 번 클릭으로 넣을 제안 값 (동승자 소속 ← 신청인 소속 등). 없으면 표시하지 않는다. */
+    getSuggestions?: (key: string) => { label: string; values: string[] } | null;
     /** 셀 값 반영 — 빈 문자열이면 칸을 비운다 */
     commit: (key: string, value: string) => void;
     /** 운임 행의 현재 삭제 상태 */
@@ -325,6 +327,7 @@ export function attachInlineEditing(deps: InlineEditDeps): InlineEditHandle {
       config: { type: 'text' },
       placeholder: region.placeholder,
       initialValue: cells.getValue(region.key),
+      suggestions: cells.getSuggestions?.(region.key) ?? undefined,
       anchor,
       onConfirm: (raw) => cells.commit(region.key, raw.trim()),
       onCancel: () => undefined,
