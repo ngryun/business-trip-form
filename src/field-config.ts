@@ -61,14 +61,16 @@ export function normalizeDateTimeLocalStep(value: string): string {
   if (!match) return value;
 
   const [, y, m, d, hh, mm] = match;
-  const date = new Date(Number(y), Number(m) - 1, Number(d), 0, 0, 0, 0);
+  const date = new Date(0);
+  date.setFullYear(Number(y), Number(m) - 1, Number(d));
+  date.setHours(0, 0, 0, 0);
   if (Number.isNaN(date.getTime())) return value;
 
   const totalMinutes = Number(hh) * 60 + Number(mm);
   const snappedMinutes = Math.round(totalMinutes / DATETIME_MINUTE_STEP) * DATETIME_MINUTE_STEP;
   date.setMinutes(snappedMinutes);
 
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+  return `${String(date.getFullYear()).padStart(4, '0')}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 }
 
 export function composeDateTimeLocalValue(date: string, hour: string, minute: string): string {

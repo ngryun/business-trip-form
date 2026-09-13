@@ -48,8 +48,9 @@ export function setupDateTimePicker(root: HTMLElement, options: DateTimePickerOp
   }
   function setValue(value: string): void {
     const parts = splitDateTimeLocal(value);
-    date.value = parts.date;
-    time.value = parts.hour && parts.minute ? `${parts.hour}:${parts.minute}` : '';
+    if (date.value !== parts.date) date.value = parts.date;
+    const timeValue = parts.hour && parts.minute ? `${parts.hour}:${parts.minute}` : '';
+    if (time.value !== timeValue) time.value = timeValue;
     syncHidden();
   }
   function commit(): void {
@@ -59,8 +60,36 @@ export function setupDateTimePicker(root: HTMLElement, options: DateTimePickerOp
     if (value) setValue(value);
     options.onChange?.(value);
   }
-  date.addEventListener('change', commit);
-  time.addEventListener('change', commit);
+  for (const input of [date, time]) {
+    let keyboardEditing = false;
+    let pendingChange = false;
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && pendingChange) {
+        pendingChange = false;
+        keyboardEditing = false;
+        commit();
+      }
+      if (event.key !== 'Tab' && event.key !== 'Escape' && event.key !== 'Enter') keyboardEditing = true;
+    });
+    input.addEventListener('pointerdown', () => { keyboardEditing = false; });
+    input.addEventListener('change', () => {
+      // 네이티브 날짜 입력은 연·월·일의 각 키 입력에도 change를 발생시킨다.
+      // 편집 중 값을 대입하면 연도가 잘리거나 선택 중인 날짜 구간이 초기화된다.
+      if (keyboardEditing && document.activeElement === input) {
+        pendingChange = true;
+        return;
+      }
+      pendingChange = false;
+      commit();
+    });
+    input.addEventListener('blur', () => {
+      keyboardEditing = false;
+      if (pendingChange) {
+        pendingChange = false;
+        commit();
+      }
+    });
+  }
   setValue(hidden.value);
   const controller: DateTimePickerController = { getDate: () => date.value, getValue: () => hidden.value, setValue, syncHidden };
   pickerControllers.set(root, controller);
