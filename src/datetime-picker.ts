@@ -1,4 +1,5 @@
 import { composeDateTimeLocalValue, DATETIME_STEP_SECONDS, splitDateTimeLocal } from './field-config';
+import { createDateInput } from './date-input';
 
 export interface DateTimePickerController {
   getDate: () => string;
@@ -25,12 +26,12 @@ export function setupDateTimePicker(root: HTMLElement, options: DateTimePickerOp
   root.classList.add('datetime-picker', 'datetime-picker--compact');
   const row = document.createElement('div');
   row.className = 'datetime-picker__inputs';
-  const dateLabel = document.createElement('label');
-  dateLabel.textContent = '날짜';
-  const date = document.createElement('input');
-  date.type = 'date';
-  date.className = 'datetime-picker__date';
-  dateLabel.append(date);
+  const dateLabel = document.createElement('div');
+  dateLabel.className = 'datetime-picker__date-group';
+  const caption = document.createElement('span');
+  caption.textContent = '날짜';
+  const date = createDateInput();
+  dateLabel.append(caption, date.root);
   const timeLabel = document.createElement('label');
   timeLabel.textContent = '시간';
   const time = document.createElement('input');
@@ -43,24 +44,34 @@ export function setupDateTimePicker(root: HTMLElement, options: DateTimePickerOp
 
   function syncHidden(): string {
     const [hour = '', minute = ''] = time.value.split(':');
-    hidden!.value = composeDateTimeLocalValue(date.value, hour, minute);
+    hidden!.value = composeDateTimeLocalValue(date.getValue(), hour, minute);
     return hidden!.value;
   }
   function setValue(value: string): void {
     const parts = splitDateTimeLocal(value);
-    if (date.value !== parts.date) date.value = parts.date;
+    date.setValue(parts.date);
     const timeValue = parts.hour && parts.minute ? `${parts.hour}:${parts.minute}` : '';
     if (time.value !== timeValue) time.value = timeValue;
     syncHidden();
   }
   function commit(): void {
-    if (date.value && !time.value) time.value = `${options.defaultHour ?? '09'}:${options.defaultMinute ?? '00'}`;
+    if (date.getValue() && !time.value) time.value = `${options.defaultHour ?? '09'}:${options.defaultMinute ?? '00'}`;
     const value = syncHidden();
     // 실제 반영되는 10분 단위 값을 입력창에도 표시한다.
     if (value) setValue(value);
     options.onChange?.(value);
   }
-  for (const input of [date, time]) {
+  date.root.addEventListener('change', () => {
+    // 연도를 바꾸는 중간 값으로 종료일을 이동시키지 않는다.
+    if (!date.root.contains(document.activeElement) || (document.activeElement as HTMLInputElement | null)?.type !== 'text') commit();
+  });
+  date.root.addEventListener('focusout', (event) => {
+    if (!date.root.contains(event.relatedTarget as Node | null)) commit();
+  });
+  date.root.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') commit();
+  });
+  for (const input of [time]) {
     let keyboardEditing = false;
     let pendingChange = false;
     input.addEventListener('keydown', (event) => {
@@ -91,7 +102,7 @@ export function setupDateTimePicker(root: HTMLElement, options: DateTimePickerOp
     });
   }
   setValue(hidden.value);
-  const controller: DateTimePickerController = { getDate: () => date.value, getValue: () => hidden.value, setValue, syncHidden };
+  const controller: DateTimePickerController = { getDate: date.getValue, getValue: () => hidden.value, setValue, syncHidden };
   pickerControllers.set(root, controller);
   return controller;
 }

@@ -1379,3 +1379,11 @@ html, body {
 .form-pane .field-popover__presets > .field-popover__recent-label { display: none; }
 .form-pane .field-popover__presets { gap: 4px; }
 .form-pane .field-popover__presets .field-popover__recent-chip { padding-left: 8px; padding-right: 8px; font-size: 11px; }
+
+.datetime-picker__date-group { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: #64748b; font-size: 12px; }
+.date-input { position: relative; display: flex; align-items: center; gap: 2px; min-width: 0; padding: 0 3px; border: 1px solid #cbd5e1; border-radius: 6px; background: white; }
+.datetime-picker__inputs .date-input__part { width: 0; min-width: 0; flex: 2; padding: 6px 0; border: 0; text-align: center; background: transparent; }
+.datetime-picker__inputs .date-input__part--year { flex: 4; }
+.date-input__button { flex: 0 0 24px; padding: 4px 0; border: 0; background: transparent; color: #475569; cursor: pointer; font-size: 20px; }
+.datetime-picker__inputs .date-input__calendar { position: absolute; right: 0; bottom: 0; width: 1px; height: 1px; min-height: 0; padding: 0; border: 0; opacity: 0; pointer-events: none; }
+.form-pane .datetime-picker__date-group > span:first-child { display: none; }

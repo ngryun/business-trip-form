@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import ts from 'typescript';
+import { createDateInput } from '../src/date-input.ts';
 import { normalizeDateTimeLocalStep } from '../src/field-config.ts';
 
 const source = readFileSync(new URL('../src/datetime-picker.ts', import.meta.url), 'utf8')
-  .replace("'./field-config'", JSON.stringify(new URL('../src/field-config.ts', import.meta.url).href));
+  .replace("'./field-config'", JSON.stringify(new URL('../src/field-config.ts', import.meta.url).href))
+  .replace("'./date-input'", JSON.stringify(new URL('../src/date-input.ts', import.meta.url).href));
 const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
 const { setupDateTimePicker } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 
@@ -13,6 +15,10 @@ class Element extends EventTarget {
   children = [];
   value = '';
   classList = { add() {} };
+  setAttribute() {}
+  contains(element) { return this === element || this.children.some(child => child.contains(element)); }
+  select() { this.selected = true; }
+  focus() { document.activeElement = this; fire(this, 'focus'); }
   append(...children) { this.children.push(...children); }
   querySelector(selector) {
     const type = selector.match(/type="(.*?)"/)[1];
@@ -37,20 +43,28 @@ function picker(value = '2026-09-13T09:00') {
   return { date: root.querySelector('input[type="date"]'), time: root.querySelector('input[type="time"]'), hidden, changes };
 }
 
-test('연도를 연속 입력하는 동안 값을 다시 쓰거나 종료일 변경을 알리지 않는다', () => {
-  const { date, hidden, changes } = picker();
-  document.activeElement = date;
-  for (const year of ['0002', '0020', '0202', '2027']) {
-    fire(date, 'keydown', year.at(-1));
-    date.value = `${year}-09-13`;
-    fire(date, 'change');
-    assert.equal(date.value, `${year}-09-13`);
-    assert.equal(hidden.value, '2026-09-13T09:00');
-    assert.equal(changes.length, 0);
+test('연도 네 자리와 월 두 자리 입력 시 다음 칸을 자동 선택한다', () => {
+  globalThis.document = { createElement: () => new Element(), activeElement: null };
+  const date = createDateInput();
+  const [year, month, day] = date.root.children.filter(child => child.type === 'text');
+  year.focus();
+  for (const value of ['2', '20', '202']) {
+    year.value = value;
+    fire(year, 'input');
+    assert.equal(document.activeElement, year);
   }
-  document.activeElement = null;
-  fire(date, 'blur');
-  assert.deepEqual(changes, ['2027-09-13T09:00']);
+  year.value = '2026';
+  fire(year, 'input');
+  assert.equal(document.activeElement, month);
+  assert.equal(month.selected, true);
+  month.value = '09';
+  fire(month, 'input');
+  assert.equal(document.activeElement, day);
+  day.value = '13';
+  fire(day, 'input');
+  assert.equal(date.getValue(), '2026-09-13');
+  date.setValue('2026-02-30');
+  assert.equal(date.getValue(), '');
 });
 
 test('시간 보정은 입력 후 Enter로 확정하며 blur에서 중복 반영하지 않는다', () => {

@@ -302,7 +302,7 @@ export function buildDateTimeRangeChrome(args: RangeChromeArgs): RangeChromeHand
     }
   }
   function setActiveTab(tab: 'start' | 'end'): void {
-    (tab === 'start' ? startPicker : endPicker).querySelector<HTMLInputElement>('input[type="date"]')?.focus();
+    (tab === 'start' ? startPicker : endPicker).querySelector<HTMLInputElement>('.date-input__part')?.focus();
   }
   function handleStartChange(): void {
     const { start, end } = values();
