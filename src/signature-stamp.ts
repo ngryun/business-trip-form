@@ -62,12 +62,13 @@ export class SignatureStampManager {
 
   constructor(private wasm: WasmBridge) {}
 
-  async applyFile(file: File): Promise<StoredSignatureStamp> {
+  async applyFile(file: File, shouldApply: () => boolean = () => true): Promise<StoredSignatureStamp | null> {
     if (!file.type.startsWith('image/')) {
       throw new Error('이미지 파일을 선택해 주세요.');
     }
 
     const image = await prepareImage(file);
+    if (!shouldApply()) return null;
     const stored = preparedImageToStored(image);
     this.applyPreparedImage(image, stored);
     return stored;
@@ -165,7 +166,7 @@ export class SignatureStampManager {
     this.wasm.refreshLayout();
     const current = this.findPictureLayout(this.ref);
     const target = findSignatureTarget(this.wasm);
-    if (!current || !target || current.pageIndex !== target.pageIndex) return false;
+    if (!current || !target || current.pageIndex !== target.pageIndex) { console.warn('[stamp-debug]', {current, target}); return false; }
 
     const props = this.wasm.getPictureProperties(this.ref.sec, this.ref.paraIdx, this.ref.controlIdx);
     const currentHorzPx = props.horzOffset / HWPUNIT_PER_PAGE_PX;

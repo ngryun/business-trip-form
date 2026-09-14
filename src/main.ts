@@ -10,7 +10,7 @@ import { attachInlineEditing, type InlineEditHandle } from './field-interaction'
 import { buildDateTimeRangeChrome, showStampPopover, type FareDirection, type RangeChromeHandle } from './field-popover';
 import { setupDateTimePicker, type DateTimePickerController } from './datetime-picker';
 import { SignatureStampManager, type StoredSignatureStamp } from './signature-stamp';
-import { openStampGenerator } from './stamp-generator';
+import { createDefaultStamp, openStampGenerator } from './stamp-generator';
 import { printPdf, type PdfSaveResult } from './print-pdf';
 import { pushRecentValue } from './recent-values';
 import {
@@ -1128,6 +1128,57 @@ async function initialize(): Promise<void> {
     }
   }
 
+  let automaticStampTimer = 0;
+  let automaticStampVersion = 0;
+  let automaticStampDataUrl: string | null = null;
+
+  function cancelAutomaticStamp(): void {
+    window.clearTimeout(automaticStampTimer);
+    automaticStampVersion += 1;
+    automaticStampDataUrl = null;
+  }
+
+  function applicantStampName(): string {
+    const control = formEl.elements.namedItem('성명');
+    return control instanceof HTMLInputElement ? control.value.replace(/\s+/g, '') : '';
+  }
+
+  function scheduleAutomaticStamp(): void {
+    window.clearTimeout(automaticStampTimer);
+    const version = ++automaticStampVersion;
+    const name = applicantStampName();
+    const canReplace = () => !signatureStamp.hasStamp()
+      || (automaticStampDataUrl !== null && signatureStamp.getStoredStamp()?.dataUrl === automaticStampDataUrl);
+    if (!canReplace()) return;
+    if (!name) {
+      if (automaticStampDataUrl) {
+        signatureStamp.clear();
+        automaticStampDataUrl = null;
+        refreshPreviewAndRealignSignatureStamp();
+        updateSignatureButtons();
+      }
+      return;
+    }
+    // 한글 조합과 연속 입력이 끝난 뒤 생성하며, 이전 이름의 비동기 결과는 버린다.
+    automaticStampTimer = window.setTimeout(async () => {
+      const isCurrent = () => version === automaticStampVersion && name === applicantStampName() && canReplace();
+      try {
+        const file = await createDefaultStamp(name);
+        if (!isCurrent()) return;
+        const stored = await signatureStamp.applyFile(file, isCurrent);
+        if (!stored) return;
+        automaticStampDataUrl = stored.dataUrl;
+        refreshPreviewAndRealignSignatureStamp();
+        updateSignatureButtons();
+        setStatus('성명으로 기본 개인인감을 만들었습니다. 계속 쓰려면 브라우저 저장을 누르세요.');
+      } catch (err) {
+        if (isCurrent()) setStatus(`기본 도장 생성 실패: ${describeError(err)}`, true);
+      }
+    }, 650);
+  }
+
+  scheduleAutomaticStamp();
+
   let livePreviewTimer = 0;
   function scheduleLivePreview(statusMessage?: string): void {
     window.clearTimeout(livePreviewTimer);
@@ -1150,11 +1201,13 @@ async function initialize(): Promise<void> {
     const target = event.target;
     if (target instanceof HTMLInputElement && target.type === 'file') return;
     scheduleLivePreview();
+    if (target instanceof HTMLInputElement && target.name === '성명') scheduleAutomaticStamp();
   });
   formEl.addEventListener('change', (event) => {
     const target = event.target;
     if (target instanceof HTMLInputElement && target.type === 'file') return;
     scheduleLivePreview();
+    if (target instanceof HTMLInputElement && target.name === '성명') scheduleAutomaticStamp();
   });
 
   // 4) 인라인 편집 핸들러 부착 — 누름틀 + 일반 셀(식비·동승자·운임) + (인)/도장 영역
@@ -1194,6 +1247,7 @@ async function initialize(): Promise<void> {
     },
     onAfterEdit: (label, value) => {
       syncFormFromInline(label, value);
+      if (label === '성명' || label === '이름') scheduleAutomaticStamp();
       if (label === '시작일시' || label === '종료일시') {
         applyTravelDatesToPreview();
       }
@@ -1222,6 +1276,7 @@ async function initialize(): Promise<void> {
 
   // 5) 액션 버튼 바인딩
   async function applySignatureFile(file: File, successMessage: string): Promise<void> {
+    cancelAutomaticStamp();
     try {
       await signatureStamp.applyFile(file);
       refreshPreviewAndRealignSignatureStamp();
@@ -1243,6 +1298,8 @@ async function initialize(): Promise<void> {
 
   /** 이름 → 막도장 생성기. 사이드패널 버튼과 미리보기 도장 메뉴가 공유한다. */
   function openStampGeneratorWithName(): void {
+    window.clearTimeout(automaticStampTimer);
+    automaticStampVersion += 1;
     const nameControl = formEl.elements.namedItem('성명');
     openStampGenerator({
       initialName: nameControl instanceof HTMLInputElement ? nameControl.value.trim() : '',
@@ -1268,6 +1325,7 @@ async function initialize(): Promise<void> {
   }
 
   function clearSignatureFromDocument(): void {
+    cancelAutomaticStamp();
     const removed = signatureStamp.clear();
     if (signatureInput) signatureInput.value = '';
     updateSignatureButtons();
@@ -1300,6 +1358,7 @@ async function initialize(): Promise<void> {
       return;
     }
     updateSignatureButtons();
+    cancelAutomaticStamp();
     setStatus('도장/서명 이미지를 브라우저에 저장했습니다.');
   });
 
@@ -1461,6 +1520,7 @@ async function initialize(): Promise<void> {
     if (!window.confirm('작성 중인 모든 입력과 임시 저장 내용을 지울까요?')) return;
     // 입력 직후 초기화하면 120ms 디바운스 타이머가 옛 입력값을 다시 반영할 수 있어 먼저 취소
     window.clearTimeout(livePreviewTimer);
+    cancelAutomaticStamp();
     const removedStamp = signatureStamp.clear();
     formEl.reset();
     for (const direction of ['갈때', '올때']) {

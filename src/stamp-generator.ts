@@ -1,11 +1,5 @@
-/**
- * 도장 이미지 생성기 — 이름을 받아 막도장 스타일 PNG 를 캔버스로 그린다.
- *
- * - 양각: 흰 바탕(투명) + 빨간 테두리 + 빨간 글자 / 음각: 빨간 원 + 흰 글자
- * - 끝글자: 인 / 印 / 없음 — 이름에 한자가 섞여 있으면 印 을 자동 선택
- * - 글자 수(이름+끝글자)에 따라 원 안에 1~2줄 격자로 배치
- * - 생성한 PNG 는 File 로 콜백에 넘겨 기존 도장 적용 흐름(applyFile)을 재사용한다
- */
+/** 이름으로 개인인감 PNG를 생성한다. 기본값: 송명, 인 붙이기, 옅은 마모. */
+import { drawPersonalStamp as drawStamp, loadStampFont } from './personal-stamp.js';
 
 export interface StampGeneratorOptions {
   initialName: string;
@@ -13,9 +7,6 @@ export interface StampGeneratorOptions {
 }
 
 const STAMP_SIZE = 320;
-const STAMP_RED = '#c43027';
-const STAMP_FONT = '"Noto Serif KR", "함초롬바탕", serif';
-const HANJA_RE = /[㐀-䶿一-鿿豈-﫿]/;
 
 let currentDialog: HTMLElement | null = null;
 
@@ -32,7 +23,7 @@ export function openStampGenerator(opts: StampGeneratorOptions): void {
 
   const title = document.createElement('div');
   title.className = 'stamp-dialog__title';
-  title.textContent = '도장 이미지 만들기';
+  title.textContent = '개인인감 만들기 · 송명';
 
   // 이름 입력
   const nameLabel = document.createElement('label');
@@ -46,12 +37,11 @@ export function openStampGenerator(opts: StampGeneratorOptions): void {
   nameLabel.appendChild(nameInput);
 
   // 끝글자 / 새김 선택
-  let suffixTouched = false;
   const suffixRow = createRadioRow('끝글자', 'stamp-suffix', [
     { value: '인', label: '인' },
     { value: '印', label: '印' },
     { value: '', label: '없음' },
-  ], () => { suffixTouched = true; redraw(); });
+  ], redraw);
   const styleRow = createRadioRow('새김', 'stamp-style', [
     { value: 'yang', label: '양각 (빨간 글자)' },
     { value: 'eum', label: '음각 (흰 글자)' },
@@ -87,12 +77,6 @@ export function openStampGenerator(opts: StampGeneratorOptions): void {
     return nameInput.value.replace(/\s+/g, '');
   }
 
-  /** 이름에 한자가 있으면 印, 없으면 인 — 사용자가 직접 고른 뒤에는 건드리지 않는다. */
-  function autoPickSuffix(): void {
-    if (suffixTouched) return;
-    suffixRow.setValue(HANJA_RE.test(cleanName()) ? '印' : '인');
-  }
-
   function redraw(): void {
     const name = cleanName();
     drawStamp(canvas, name, suffixRow.getValue(), styleRow.getValue() as 'yang' | 'eum');
@@ -100,7 +84,7 @@ export function openStampGenerator(opts: StampGeneratorOptions): void {
   }
 
   nameInput.addEventListener('input', () => {
-    autoPickSuffix();
+    void loadStampFont(cleanName()).then(redraw);
     redraw();
   });
 
@@ -115,9 +99,12 @@ export function openStampGenerator(opts: StampGeneratorOptions): void {
     }
   });
 
-  generateBtn.addEventListener('click', () => {
+  generateBtn.addEventListener('click', async () => {
     const name = cleanName();
     if (!name) return;
+    generateBtn.disabled = true;
+    await loadStampFont(name);
+    drawStamp(canvas, name, suffixRow.getValue(), styleRow.getValue() as 'yang' | 'eum');
     canvas.toBlob((blob) => {
       if (!blob) return;
       const file = new File([blob], `도장_${name}.png`, { type: 'image/png' });
@@ -126,12 +113,8 @@ export function openStampGenerator(opts: StampGeneratorOptions): void {
     }, 'image/png');
   });
 
-  // 폰트(한자 포함)가 로드되면 다시 그려 첫 미리보기가 시스템 폰트로 굳는 것을 막는다
-  autoPickSuffix();
   redraw();
-  try {
-    document.fonts.load(`100px ${STAMP_FONT}`, `${cleanName()}印인`).then(() => redraw());
-  } catch { /* font loading API 미지원 시 시스템 폰트로 그린다 */ }
+  void loadStampFont(cleanName()).then(redraw);
 
   setTimeout(() => nameInput.focus(), 0);
 }
@@ -183,70 +166,16 @@ function createRadioRow(
   };
 }
 
-/** 글자 수에 따른 원 안 배치 — 중심 기준 픽셀 오프셋과 폰트 크기 */
-function layoutChars(count: number): { font: number; positions: Array<[number, number]> } {
-  switch (count) {
-    case 1: return { font: 168, positions: [[0, 0]] };
-    case 2: return { font: 116, positions: [[0, -62], [0, 62]] };
-    case 3: return { font: 102, positions: [[-57, -58], [57, -58], [0, 58]] };
-    case 4: return { font: 102, positions: [[-57, -58], [57, -58], [-57, 58], [57, 58]] };
-    default: {
-      // 5자 이상 — 2줄로 나누고 줄 길이에 맞춰 축소
-      const top = Math.ceil(count / 2);
-      const bottom = count - top;
-      const font = Math.max(56, Math.floor(210 / top));
-      const positions: Array<[number, number]> = [];
-      const spread = (len: number, y: number): void => {
-        const spacing = Math.min(116, 216 / Math.max(1, len - 1) + 8);
-        for (let i = 0; i < len; i += 1) {
-          positions.push([(i - (len - 1) / 2) * spacing, y]);
-        }
-      };
-      spread(top, -58);
-      spread(bottom, 58);
-      return { font, positions };
-    }
-  }
-}
-
-function drawStamp(canvas: HTMLCanvasElement, name: string, suffix: string, style: 'yang' | 'eum'): void {
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
-  const S = STAMP_SIZE;
-  const center = S / 2;
-  ctx.clearRect(0, 0, S, S);
-
-  const ringWidth = 14;
-  const radius = center - ringWidth / 2 - 4;
-
-  if (style === 'eum') {
-    ctx.fillStyle = STAMP_RED;
-    ctx.beginPath();
-    ctx.arc(center, center, radius + ringWidth / 2, 0, Math.PI * 2);
-    ctx.fill();
-  } else {
-    ctx.strokeStyle = STAMP_RED;
-    ctx.lineWidth = ringWidth;
-    ctx.beginPath();
-    ctx.arc(center, center, radius, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-
-  const chars = [...name];
-  if (suffix) chars.push(suffix);
-  if (chars.length === 0) return;
-
-  const { font, positions } = layoutChars(chars.length);
-  ctx.fillStyle = style === 'eum' ? '#ffffff' : STAMP_RED;
-  ctx.strokeStyle = ctx.fillStyle;
-  ctx.lineWidth = Math.max(1.5, font * 0.04); // fill+stroke 로 굵은 새김 느낌
-  ctx.font = `700 ${font}px ${STAMP_FONT}`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-
-  chars.forEach((ch, i) => {
-    const [dx, dy] = positions[i] ?? [0, 0];
-    ctx.fillText(ch, center + dx, center + dy);
-    ctx.strokeText(ch, center + dx, center + dy);
+/** 폰트 로딩이 끝난 뒤 기본 도장을 만들어 자동 삽입에도 같은 렌더러를 쓴다. */
+export async function createDefaultStamp(name: string): Promise<File> {
+  const cleanName = name.replace(/\s+/g, '');
+  if (!cleanName) throw new Error('도장을 만들 이름을 입력해 주세요.');
+  await loadStampFont(cleanName);
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = STAMP_SIZE;
+  drawStamp(canvas, cleanName);
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(value => value ? resolve(value) : reject(new Error('도장 이미지 생성에 실패했습니다.')), 'image/png');
   });
+  return new File([blob], `도장_${cleanName}.png`, { type: 'image/png' });
 }
