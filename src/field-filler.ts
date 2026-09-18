@@ -22,6 +22,19 @@ export type FieldMap = Map<string, FieldEntry[]>;
 /** 시작일시 누름틀에 범위를 합쳐 넣으므로, 종료일시 누름틀은 항상 비운 채로 둔다 (안내문구 복원 금지). */
 const SUPPRESSED_GUIDE_LABELS = new Set(['종료일시']);
 
+/** "행 삭제"된 운임 행의 누름틀 라벨 — 값이 비어도 안내문구를 되살리지 않는다. 호출자가 갱신한다. */
+const suppressedFareGuideLabels = new Set<string>();
+
+/** 운임 행 삭제 상태에 맞춰 안내문구 복원을 막을 라벨 목록을 교체한다. */
+export function setSuppressedFareGuideLabels(labels: Iterable<string>): void {
+  suppressedFareGuideLabels.clear();
+  for (const label of labels) suppressedFareGuideLabels.add(label);
+}
+
+function isGuideSuppressed(label: string): boolean {
+  return SUPPRESSED_GUIDE_LABELS.has(label) || suppressedFareGuideLabels.has(label);
+}
+
 interface SetFieldValuesOptions {
   clearEmpty?: boolean;
 }
@@ -292,7 +305,7 @@ function restoreEmptyFieldGuides(wasm: WasmBridge, fields: FieldMap): void {
   const latestById = new Map(wasm.getFieldList().map((f) => [f.fieldId, f]));
   const seen = new Set<number>();
   for (const [label, entries] of fields) {
-    if (SUPPRESSED_GUIDE_LABELS.has(label)) continue;
+    if (isGuideSuppressed(label)) continue;
     for (const entry of entries) {
       if (seen.has(entry.fieldId)) continue;
       seen.add(entry.fieldId);

@@ -33,17 +33,25 @@ export function applyExpenseFields(wasm: WasmBridge, values: Record<string, stri
   }
 }
 
-export function removeFareRows(wasm: WasmBridge, values: Record<string, string>): void {
-  // 뒤에서부터 삭제하여 앞 행의 좌표를 유지한다. 병합된 운임 제목은 엔진이 조정한다.
-  for (const direction of ['올때', '갈때']) {
+/** 운임 행 삭제 시 비우는 누름틀 이름 접미사. */
+export const FARE_FIELD_SUFFIXES = ['일자', '교통편', '출발지', '도착지'] as const;
+
+/**
+ * "행 삭제"된 운임 행의 내용을 비운다 — 표의 행 자체는 그대로 두고, 그 행의 누름틀 값과
+ * 안내문구(빨간 placeholder)만 지워 빈 칸으로 보이게 한다. name 은 유지해 재탐색·복원이 가능하다.
+ */
+export function clearFareRows(wasm: WasmBridge, values: Record<string, string>): void {
+  for (const direction of ['갈때', '올때']) {
     if (values[`${direction}운임삭제`] !== '1') continue;
-    const field = wasm.getFieldList().find((entry) => entry.name === `${direction}일자`);
-    const path = field?.location.path?.[0];
-    if (!field || !path) continue;
-    const { sectionIndex: sec, paraIndex: para } = field.location;
-    const { row } = wasm.getCellInfo(sec, para, path.controlIndex, path.cellIndex);
-    if (!wasm.deleteTableRow(sec, para, path.controlIndex, row).ok) {
-      throw new Error('운임 행을 삭제하지 못했습니다.');
+    for (const suffix of FARE_FIELD_SUFFIXES) {
+      const name = `${direction}${suffix}`;
+      for (const field of wasm.getFieldList()) {
+        if (field.name !== name) continue;
+        if ((field.value ?? '') !== '') wasm.setFieldValue(field.fieldId, '');
+        const props = wasm.getClickHereProps(field.fieldId);
+        if (!props.ok || !props.guide) continue;
+        wasm.updateClickHereProps(field.fieldId, '', props.memo ?? '', props.name || name, props.editable ?? true);
+      }
     }
   }
 }

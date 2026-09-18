@@ -1,8 +1,8 @@
 import { setupFormTabs } from './form-tabs';
-import { applyExpenseFields, removeFareRows } from './expense-fields';
+import { applyExpenseFields, clearFareRows, FARE_FIELD_SUFFIXES } from './expense-fields';
 import { getCellRegions, invalidateCellRegions } from './cell-fields';
 import { loadTemplate } from './template-loader';
-import { discoverFields, fillDateTimeRange, removeDateTimeRangeSeparator, setFieldValues, type FieldMap } from './field-filler';
+import { discoverFields, fillDateTimeRange, removeDateTimeRangeSeparator, setFieldValues, setSuppressedFareGuideLabels, type FieldMap } from './field-filler';
 import { downloadHwp } from './download';
 import { mountPreview, refreshPreview, reloadPreservingScroll, setPreviewReloadHook } from './preview';
 import { registerFontFaces, preloadFonts } from './fonts';
@@ -1055,7 +1055,14 @@ async function initialize(): Promise<void> {
     const hadStamp = signatureStamp.hasStamp();
     signatureStamp.forgetDocumentState();
     wasm.loadDocument(templateBytes);
-    removeFareRows(wasm, collectRawFormValues());
+    // 운임 "행 삭제"는 표의 행을 지우지 않고 그 행의 내용(값·안내문구)만 비운다.
+    const rawValues = collectRawFormValues();
+    setSuppressedFareGuideLabels(
+      ['갈때', '올때']
+        .filter((direction) => rawValues[`${direction}운임삭제`] === '1')
+        .flatMap((direction) => FARE_FIELD_SUFFIXES.map((suffix) => `${direction}${suffix}`)),
+    );
+    clearFareRows(wasm, rawValues);
     fields = discoverFields(wasm);
     removeDateTimeRangeSeparator(wasm, fields);
     wasm.refreshLayout();
@@ -1228,7 +1235,7 @@ async function initialize(): Promise<void> {
       toggleFare: (direction) => {
         toggleFareRow(direction);
         const deleted = getFareDeletedState()[direction];
-        setStatus(`${direction === '갈때' ? '갈 때' : '올 때'} 운임 행을 ${deleted ? '삭제' : '복원'}했습니다.`);
+        setStatus(`${direction === '갈때' ? '갈 때' : '올 때'} 운임 행의 내용을 ${deleted ? '지웠습니다' : '복원했습니다'}.`);
       },
     },
     stamp: {

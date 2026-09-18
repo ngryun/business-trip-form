@@ -84,7 +84,7 @@ export function computeCellRegions(wasm: WasmBridge): CellRegion[] {
   const cellAt = (row: number, col: number): CellBbox | undefined =>
     bboxes.find((bbox) => bbox.row === row && bbox.col === col);
 
-  // 제목 칸(0열)의 글자로 행 위치를 찾는다 — 운임 행이 삭제되면 행 번호가 밀리기 때문.
+  // 제목 칸(0열)의 글자로 행 위치를 찾는다 — 양식 구조가 바뀌어도 행 번호에 의존하지 않도록.
   const rowOfLabel = (text: string): number | null => {
     for (const bbox of bboxes) {
       if (bbox.col !== 0) continue;
