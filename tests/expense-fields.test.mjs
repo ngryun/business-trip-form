@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { initSync, HwpDocument } from '@rhwp/core';
-import { applyExpenseFields, removeFareRows } from '../src/expense-fields.ts';
+import { applyExpenseFields, clearFareRows } from '../src/expense-fields.ts';
 
 initSync({ module: readFileSync(new URL('../node_modules/@rhwp/core/rhwp_bg.wasm', import.meta.url)) });
 const template = readFileSync(new URL('../public/templates/business-trip.hwp', import.meta.url));
-const jsonMethods = new Set(['getFieldList', 'getTableDimensions', 'getCellInfo', 'deleteTableRow']);
+const jsonMethods = new Set(['getFieldList', 'getTableDimensions', 'getCellInfo', 'setFieldValue', 'getClickHereProps', 'updateClickHereProps']);
 function bridge(doc) {
   return new Proxy(doc, { get(target, key) {
     return (...args) => {
@@ -26,16 +26,29 @@ for (const deleted of [[], ['갈때'], ['올때'], ['갈때', '올때']]) {
     const wasm = bridge(doc);
     const values = { 식비지급받은금액: '2식', 총동승자수: '3명', 동승자1소속: '설악고', 동승자1성명: '홍길동', 동승자4성명: '김철수' };
     for (const dir of deleted) values[`${dir}운임삭제`] = '1';
-    removeFareRows(wasm, values);
+    clearFareRows(wasm, values);
     applyExpenseFields(wasm, values);
     assert.ok(text(doc).includes('2식'));
     applyExpenseFields(wasm, { ...values, 식비지급받은금액: '지급 없음' });
     const restored = new HwpDocument(doc.exportHwp());
     restored.convertToEditable();
-    assert.equal(JSON.parse(restored.getTableDimensions(0, 6, 0)).rowCount, 16 - deleted.length);
+    // 운임 "행 삭제"는 표의 행을 지우지 않는다 — 행 수는 항상 그대로.
+    assert.equal(JSON.parse(restored.getTableDimensions(0, 6, 0)).rowCount, 16);
     for (const value of ['지급 없음', '3명', '설악고', '홍길동', '김철수']) assert.ok(text(restored).includes(value), value);
     const fields = JSON.parse(restored.getFieldList());
-    for (const dir of ['갈때', '올때']) assert.equal(fields.some((field) => field.name === `${dir}일자`), !deleted.includes(dir));
+    for (const dir of ['갈때', '올때']) {
+      for (const suffix of ['일자', '교통편', '출발지', '도착지']) {
+        const field = fields.find((entry) => entry.name === `${dir}${suffix}`);
+        assert.ok(field, `${dir}${suffix} 누름틀은 남아 있어야 한다`);
+        const props = JSON.parse(restored.getClickHereProps(field.fieldId));
+        if (deleted.includes(dir)) {
+          assert.equal(field.value ?? '', '', `${dir}${suffix} 값은 비어야 한다`);
+          assert.equal(props.guide ?? '', '', `${dir}${suffix} 안내문구는 비어야 한다`);
+        } else {
+          assert.ok(props.guide, `${dir}${suffix} 안내문구는 유지되어야 한다`);
+        }
+      }
+    }
     applyExpenseFields(bridge(restored), {});
     for (const value of ['지급 없음', '3명', '설악고', '홍길동', '김철수']) assert.ok(!text(restored).includes(value));
     restored.free();

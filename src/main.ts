@@ -1,8 +1,8 @@
 import { setupFormTabs } from './form-tabs';
-import { applyExpenseFields, removeFareRows } from './expense-fields';
+import { applyExpenseFields, clearFareRows, FARE_FIELD_SUFFIXES } from './expense-fields';
 import { getCellRegions, invalidateCellRegions } from './cell-fields';
 import { loadTemplate } from './template-loader';
-import { discoverFields, fillDateTimeRange, removeDateTimeRangeSeparator, setFieldValues, type FieldMap } from './field-filler';
+import { discoverFields, fillDateTimeRange, removeDateTimeRangeSeparator, setFieldValues, setSuppressedFareGuideLabels, type FieldMap } from './field-filler';
 import { downloadHwp } from './download';
 import { mountPreview, refreshPreview, reloadPreservingScroll, setPreviewReloadHook } from './preview';
 import { registerFontFaces, preloadFonts } from './fonts';
@@ -66,6 +66,8 @@ const applicantSaveBtn = document.getElementById('btn-save-applicant') as HTMLBu
 const applicantClearBtn = document.getElementById('btn-clear-applicants') as HTMLButtonElement | null;
 const signatureInput = document.getElementById('signature-image') as HTMLInputElement | null;
 const signatureRotateBtn = document.getElementById('btn-rotate-signature') as HTMLButtonElement | null;
+/** 앱이 만든 도장(자동 생성·도장 만들기)의 기본 기울기. 손으로 찍은 듯 보이도록 살짝 기울인다. */
+const DEFAULT_STAMP_ROTATION_DEG = 7;
 const signatureClearBtn = document.getElementById('btn-clear-signature') as HTMLButtonElement | null;
 const signatureSaveBtn = document.getElementById('btn-save-signature') as HTMLButtonElement | null;
 const signatureClearSavedBtn = document.getElementById('btn-clear-saved-signature') as HTMLButtonElement | null;
@@ -1055,7 +1057,14 @@ async function initialize(): Promise<void> {
     const hadStamp = signatureStamp.hasStamp();
     signatureStamp.forgetDocumentState();
     wasm.loadDocument(templateBytes);
-    removeFareRows(wasm, collectRawFormValues());
+    // 운임 "행 삭제"는 표의 행을 지우지 않고 그 행의 내용(값·안내문구)만 비운다.
+    const rawValues = collectRawFormValues();
+    setSuppressedFareGuideLabels(
+      ['갈때', '올때']
+        .filter((direction) => rawValues[`${direction}운임삭제`] === '1')
+        .flatMap((direction) => FARE_FIELD_SUFFIXES.map((suffix) => `${direction}${suffix}`)),
+    );
+    clearFareRows(wasm, rawValues);
     fields = discoverFields(wasm);
     removeDateTimeRangeSeparator(wasm, fields);
     wasm.refreshLayout();
@@ -1165,7 +1174,7 @@ async function initialize(): Promise<void> {
       try {
         const file = await createDefaultStamp(name);
         if (!isCurrent()) return;
-        const stored = await signatureStamp.applyFile(file, isCurrent);
+        const stored = await signatureStamp.applyFile(file, isCurrent, { rotationDeg: DEFAULT_STAMP_ROTATION_DEG });
         if (!stored) return;
         automaticStampDataUrl = stored.dataUrl;
         refreshPreviewAndRealignSignatureStamp();
@@ -1228,7 +1237,7 @@ async function initialize(): Promise<void> {
       toggleFare: (direction) => {
         toggleFareRow(direction);
         const deleted = getFareDeletedState()[direction];
-        setStatus(`${direction === '갈때' ? '갈 때' : '올 때'} 운임 행을 ${deleted ? '삭제' : '복원'}했습니다.`);
+        setStatus(`${direction === '갈때' ? '갈 때' : '올 때'} 운임 행의 내용을 ${deleted ? '지웠습니다' : '복원했습니다'}.`);
       },
     },
     stamp: {
@@ -1275,10 +1284,14 @@ async function initialize(): Promise<void> {
   });
 
   // 5) 액션 버튼 바인딩
-  async function applySignatureFile(file: File, successMessage: string): Promise<void> {
+  async function applySignatureFile(
+    file: File,
+    successMessage: string,
+    options: { rotationDeg?: number } = {},
+  ): Promise<void> {
     cancelAutomaticStamp();
     try {
-      await signatureStamp.applyFile(file);
+      await signatureStamp.applyFile(file, undefined, options);
       refreshPreviewAndRealignSignatureStamp();
       updateSignatureButtons();
       setStatus(successMessage);
@@ -1304,7 +1317,7 @@ async function initialize(): Promise<void> {
     openStampGenerator({
       initialName: nameControl instanceof HTMLInputElement ? nameControl.value.trim() : '',
       onGenerate: (file) => {
-        void applySignatureFile(file, '만든 도장을 성명 옆 (인)에 넣었습니다. 계속 쓰려면 브라우저 저장을 누르세요.');
+        void applySignatureFile(file, '만든 도장을 성명 옆 (인)에 넣었습니다. 계속 쓰려면 브라우저 저장을 누르세요.', { rotationDeg: DEFAULT_STAMP_ROTATION_DEG });
       },
     });
   }
@@ -1341,7 +1354,8 @@ async function initialize(): Promise<void> {
 
   signatureRotateBtn?.addEventListener('click', () => {
     if (!signatureStamp.hasStamp()) return;
-    rotateSignatureTo((signatureStamp.getRotationDeg() + 2) % 12); // 0→2→…→10→0 순환
+    const current = signatureStamp.getRotationDeg();
+    rotateSignatureTo(current >= 10 ? 0 : Math.min(10, current + 2)); // 2°씩 → 10° → 0° 순환 (기본 7°에서는 9→10→0)
   });
 
   signatureClearBtn?.addEventListener('click', clearSignatureFromDocument);
