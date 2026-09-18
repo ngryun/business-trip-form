@@ -8,6 +8,26 @@ export interface StampGeneratorOptions {
 
 const STAMP_SIZE = 320;
 
+/**
+ * 기본 도장 질감 — 원본 렌더러 기본값(ink 16, rough 14)은 너무 반듯해 보여
+ * 잉크 끊김과 테두리 떨림을 조금 더 준다. 이름마다 seed 를 달리해 같은 무늬가 반복되지 않게 한다.
+ */
+const STAMP_TEXTURE = { ink: 36, rough: 28 } as const;
+
+function stampSeedFromName(name: string): number {
+  let hash = 2166136261;
+  for (const ch of name) {
+    hash ^= ch.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+/** 이름·끝글자·새김에 기본 질감을 더해 그린다. 생성기 미리보기와 자동 도장이 같은 결과를 낸다. */
+export function drawDefaultStyledStamp(canvas: HTMLCanvasElement, name: string, suffix = '인', style: 'yang' | 'eum' = 'yang'): void {
+  drawStamp(canvas, name, suffix, style, { ...STAMP_TEXTURE, seed: stampSeedFromName(name) });
+}
+
 let currentDialog: HTMLElement | null = null;
 
 export function openStampGenerator(opts: StampGeneratorOptions): void {
@@ -79,7 +99,7 @@ export function openStampGenerator(opts: StampGeneratorOptions): void {
 
   function redraw(): void {
     const name = cleanName();
-    drawStamp(canvas, name, suffixRow.getValue(), styleRow.getValue() as 'yang' | 'eum');
+    drawDefaultStyledStamp(canvas, name, suffixRow.getValue(), styleRow.getValue() as 'yang' | 'eum');
     generateBtn.disabled = name.length === 0;
   }
 
@@ -104,7 +124,7 @@ export function openStampGenerator(opts: StampGeneratorOptions): void {
     if (!name) return;
     generateBtn.disabled = true;
     await loadStampFont(name);
-    drawStamp(canvas, name, suffixRow.getValue(), styleRow.getValue() as 'yang' | 'eum');
+    drawDefaultStyledStamp(canvas, name, suffixRow.getValue(), styleRow.getValue() as 'yang' | 'eum');
     canvas.toBlob((blob) => {
       if (!blob) return;
       const file = new File([blob], `도장_${name}.png`, { type: 'image/png' });
@@ -173,7 +193,7 @@ export async function createDefaultStamp(name: string): Promise<File> {
   await loadStampFont(cleanName);
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = STAMP_SIZE;
-  drawStamp(canvas, cleanName);
+  drawDefaultStyledStamp(canvas, cleanName);
   const blob = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(value => value ? resolve(value) : reject(new Error('도장 이미지 생성에 실패했습니다.')), 'image/png');
   });

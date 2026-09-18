@@ -66,6 +66,8 @@ const applicantSaveBtn = document.getElementById('btn-save-applicant') as HTMLBu
 const applicantClearBtn = document.getElementById('btn-clear-applicants') as HTMLButtonElement | null;
 const signatureInput = document.getElementById('signature-image') as HTMLInputElement | null;
 const signatureRotateBtn = document.getElementById('btn-rotate-signature') as HTMLButtonElement | null;
+/** 앱이 만든 도장(자동 생성·도장 만들기)의 기본 기울기. 손으로 찍은 듯 보이도록 살짝 기울인다. */
+const DEFAULT_STAMP_ROTATION_DEG = 7;
 const signatureClearBtn = document.getElementById('btn-clear-signature') as HTMLButtonElement | null;
 const signatureSaveBtn = document.getElementById('btn-save-signature') as HTMLButtonElement | null;
 const signatureClearSavedBtn = document.getElementById('btn-clear-saved-signature') as HTMLButtonElement | null;
@@ -1172,7 +1174,7 @@ async function initialize(): Promise<void> {
       try {
         const file = await createDefaultStamp(name);
         if (!isCurrent()) return;
-        const stored = await signatureStamp.applyFile(file, isCurrent);
+        const stored = await signatureStamp.applyFile(file, isCurrent, { rotationDeg: DEFAULT_STAMP_ROTATION_DEG });
         if (!stored) return;
         automaticStampDataUrl = stored.dataUrl;
         refreshPreviewAndRealignSignatureStamp();
@@ -1282,10 +1284,14 @@ async function initialize(): Promise<void> {
   });
 
   // 5) 액션 버튼 바인딩
-  async function applySignatureFile(file: File, successMessage: string): Promise<void> {
+  async function applySignatureFile(
+    file: File,
+    successMessage: string,
+    options: { rotationDeg?: number } = {},
+  ): Promise<void> {
     cancelAutomaticStamp();
     try {
-      await signatureStamp.applyFile(file);
+      await signatureStamp.applyFile(file, undefined, options);
       refreshPreviewAndRealignSignatureStamp();
       updateSignatureButtons();
       setStatus(successMessage);
@@ -1311,7 +1317,7 @@ async function initialize(): Promise<void> {
     openStampGenerator({
       initialName: nameControl instanceof HTMLInputElement ? nameControl.value.trim() : '',
       onGenerate: (file) => {
-        void applySignatureFile(file, '만든 도장을 성명 옆 (인)에 넣었습니다. 계속 쓰려면 브라우저 저장을 누르세요.');
+        void applySignatureFile(file, '만든 도장을 성명 옆 (인)에 넣었습니다. 계속 쓰려면 브라우저 저장을 누르세요.', { rotationDeg: DEFAULT_STAMP_ROTATION_DEG });
       },
     });
   }
@@ -1348,7 +1354,8 @@ async function initialize(): Promise<void> {
 
   signatureRotateBtn?.addEventListener('click', () => {
     if (!signatureStamp.hasStamp()) return;
-    rotateSignatureTo((signatureStamp.getRotationDeg() + 2) % 12); // 0→2→…→10→0 순환
+    const current = signatureStamp.getRotationDeg();
+    rotateSignatureTo(current >= 10 ? 0 : Math.min(10, current + 2)); // 2°씩 → 10° → 0° 순환 (기본 7°에서는 9→10→0)
   });
 
   signatureClearBtn?.addEventListener('click', clearSignatureFromDocument);

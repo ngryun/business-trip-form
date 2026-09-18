@@ -446,8 +446,15 @@ export const PERSONAL_STAMP_DEFAULTS = Object.freeze({
 export async function loadStampFont(name) {
   await ensureFont(FONTS[0], name + '인印');
 }
-export function drawPersonalStamp(canvas, name, suffix = '인', style = 'yang') {
+/**
+ * @param {HTMLCanvasElement} canvas
+ * @param {string} name
+ * @param {string} [suffix]
+ * @param {'yang'|'eum'} [style]
+ * @param {Partial<typeof PERSONAL_STAMP_DEFAULTS>} [overrides] 마모(ink)·테두리 떨림(rough)·seed 등 기본값 덮어쓰기
+ */
+export function drawPersonalStamp(canvas, name, suffix = '인', style = 'yang', overrides = {}) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return;
-  render(ctx, canvas.width, { ...PERSONAL_STAMP_DEFAULTS, text: name, suffix, style });
+  render(ctx, canvas.width, { ...PERSONAL_STAMP_DEFAULTS, ...overrides, text: name, suffix, style });
 }

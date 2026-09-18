@@ -5,4 +5,13 @@ export const PERSONAL_STAMP_DEFAULTS: Readonly<{
   ink: number; grain: number; rough: number; seed: number;
 }>;
 export function loadStampFont(name: string): Promise<void>;
-export function drawPersonalStamp(canvas: HTMLCanvasElement, name: string, suffix?: string, style?: 'yang' | 'eum'): void;
+export type PersonalStampOverrides = Partial<{
+  ink: number; grain: number; rough: number; seed: number; border: number; pad: number; rot: number;
+}>;
+export function drawPersonalStamp(
+  canvas: HTMLCanvasElement,
+  name: string,
+  suffix?: string,
+  style?: 'yang' | 'eum',
+  overrides?: PersonalStampOverrides,
+): void;

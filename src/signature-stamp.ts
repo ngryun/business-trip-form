@@ -62,14 +62,26 @@ export class SignatureStampManager {
 
   constructor(private wasm: WasmBridge) {}
 
-  async applyFile(file: File, shouldApply: () => boolean = () => true): Promise<StoredSignatureStamp | null> {
+  /**
+   * 이미지 파일을 도장으로 넣는다.
+   * @param options.rotationDeg 처음 넣을 때 적용할 기울기(0~10°). 앱이 만든 도장은 손으로 찍은 느낌을 위해 기본 기울기를 준다.
+   */
+  async applyFile(
+    file: File,
+    shouldApply: () => boolean = () => true,
+    options: { rotationDeg?: number } = {},
+  ): Promise<StoredSignatureStamp | null> {
     if (!file.type.startsWith('image/')) {
       throw new Error('이미지 파일을 선택해 주세요.');
     }
 
     const image = await prepareImage(file);
     if (!shouldApply()) return null;
-    const stored = preparedImageToStored(image);
+    const rotationDeg = Math.min(10, Math.max(0, Math.round(options.rotationDeg ?? 0)));
+    const stored: StoredSignatureStamp = {
+      ...preparedImageToStored(image),
+      ...(rotationDeg > 0 ? { rotationDeg } : {}),
+    };
     this.applyPreparedImage(image, stored);
     return stored;
   }
