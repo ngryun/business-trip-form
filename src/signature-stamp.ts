@@ -12,6 +12,8 @@ interface StampRef {
   sec: number;
   paraIdx: number;
   controlIdx: number;
+  /** insertPicture 가 그림을 담을 새 문단을 만들었는지. 삭제 시 그 문단도 함께 지워 문서가 길어지지 않게 한다. */
+  ownsParagraph: boolean;
 }
 
 interface PreparedImage {
@@ -178,7 +180,10 @@ export class SignatureStampManager {
     this.wasm.refreshLayout();
     const current = this.findPictureLayout(this.ref);
     const target = findSignatureTarget(this.wasm);
-    if (!current || !target || current.pageIndex !== target.pageIndex) { console.warn('[stamp-debug]', {current, target}); return false; }
+    if (!current || !target || current.pageIndex !== target.pageIndex) {
+      console.warn('[stamp-debug] realign 실패', JSON.stringify({ ref: this.ref, current, target }));
+      return false;
+    }
 
     const props = this.wasm.getPictureProperties(this.ref.sec, this.ref.paraIdx, this.ref.controlIdx);
     const currentHorzPx = props.horzOffset / HWPUNIT_PER_PAGE_PX;
@@ -221,12 +226,15 @@ export class SignatureStampManager {
 
   clear(): boolean {
     if (!this.ref) return false;
-    const { sec, paraIdx, controlIdx } = this.ref;
+    const { sec, paraIdx, controlIdx, ownsParagraph } = this.ref;
     this.ref = null;
     this.size = null;
     this.stored = null;
     try {
       const result = this.wasm.deletePictureControl(sec, paraIdx, controlIdx);
+      // deletePictureControl 은 그림만 지우고 insertPicture 가 만든 빈 문단은 남긴다. 도장을 바꿀 때마다
+      // 빈 줄이 하나씩 쌓여 세 번째 교체부터 (인) 이 다음 페이지로 밀려 정렬에 실패하므로 문단도 지운다.
+      if (result.ok && ownsParagraph) deleteParagraph(this.wasm, sec, paraIdx);
       this.wasm.refreshLayout();
       return result.ok;
     } catch {
@@ -255,6 +263,7 @@ export class SignatureStampManager {
     // 밀어 (인) 가 다음 페이지로 넘어간다. 그 결과 origin 측 페이지(0)와 target 측 페이지(1)가 달라져
     // 위치 정렬에 실패한다. insertPicture 자체는 width=1, height=1 HWPUNIT 으로 둬서 페이지 흐름에
     // 영향이 없도록 하고, 실제 크기는 곧이어 setPictureProperties 로 부여한다.
+    const paragraphsBefore = countParagraphs(this.wasm, 0);
     const result = this.wasm.insertPicture(
       0,
       1,
@@ -269,7 +278,14 @@ export class SignatureStampManager {
     );
     if (!result.ok) throw new Error('도장/서명 이미지를 문서에 삽입하지 못했습니다.');
 
-    const ref = { sec: 0, paraIdx: result.paraIdx, controlIdx: result.controlIdx };
+    // rhwp 0.7.11 의 insertPicture 는 그림을 넣을 문단을 새로 만든다(문단 수 +1). clear() 에서 되돌릴 수 있게 기억한다.
+    const paragraphsAfter = countParagraphs(this.wasm, 0);
+    const ref: StampRef = {
+      sec: 0,
+      paraIdx: result.paraIdx,
+      controlIdx: result.controlIdx,
+      ownsParagraph: paragraphsBefore !== null && paragraphsAfter !== null && paragraphsAfter > paragraphsBefore,
+    };
     // 페이지 좌상단에 BehindText 로 배치하고 실제 크기를 부여한다. crop 값은 명시적으로 0 으로 둬서
     // insertPicture 직후 자동 부여된 cropRight/cropBottom (≈ natural 크기) 이 남는 것을 막는다.
     this.setStampProperties(ref, size, 0, 0);
@@ -329,6 +345,32 @@ export class SignatureStampManager {
       }
     }
     return null;
+  }
+}
+
+function countParagraphs(wasm: WasmBridge, sec: number): number | null {
+  try {
+    const count = wasm.getParagraphCount(sec);
+    return Number.isFinite(count) ? count : null;
+  } catch {
+    return null;
+  }
+}
+
+/** WasmBridge 에 deleteParagraph 래퍼가 없어 엔진 문서 객체를 직접 부른다. 실패해도 도장 삭제 자체는 막지 않는다. */
+function deleteParagraph(wasm: WasmBridge, sec: number, para: number): boolean {
+  const bridge = wasm as unknown as {
+    deleteParagraph?: (sec: number, para: number) => unknown;
+    doc?: { deleteParagraph?: (sec: number, para: number) => unknown } | null;
+  };
+  try {
+    const raw = bridge.deleteParagraph
+      ? bridge.deleteParagraph(sec, para)
+      : bridge.doc?.deleteParagraph?.(sec, para);
+    const result = typeof raw === 'string' ? JSON.parse(raw) as { ok?: boolean } : raw as { ok?: boolean } | undefined;
+    return result?.ok === true;
+  } catch {
+    return false;
   }
 }
 
