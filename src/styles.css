@@ -1181,6 +1181,11 @@ html, body {
 .field-popover__confirm:hover { background: #1d4ed8 !important; }
 .field-popover__next:hover { background: #e0e7ff !important; }
 .field-popover__cancel:hover { background: #f3f4f6; }
+/* 부가 동작(운임 행 삭제/복원) — 왼쪽에 떨어뜨려 확인/취소와 구분한다 */
+.field-popover__extra { margin-right: auto; color: #374151; }
+.field-popover__extra:hover { background: #f3f4f6; }
+.field-popover__extra--danger { color: #b91c1c; border-color: #fca5a5 !important; }
+.field-popover__extra--danger:hover { background: #fef2f2; }
 
 /* 미리보기 (인)/도장 메뉴 */
 .field-popover--stamp { min-width: 240px; }
