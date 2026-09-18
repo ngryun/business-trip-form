@@ -41,6 +41,11 @@ export interface PopoverArgs {
   onConfirm: (value: string) => void;
   onCancel: () => void;
   onNext?: (value: string) => void;
+  /**
+   * 입력과 별개로 제공하는 부가 동작 버튼 (예: 운임 칸에서 "행 삭제").
+   * 누르면 팝오버를 닫고 onClick 을 부른다. 버튼 줄 왼쪽에 놓여 확인/취소와 구분된다.
+   */
+  extraAction?: { label: string; tone?: 'default' | 'danger'; onClick: () => void };
 }
 
 export interface FareRowPopoverArgs {
@@ -154,6 +159,18 @@ export function showFieldPopover(args: PopoverArgs): void {
   nextBtn.type = 'button';
   nextBtn.className = 'field-popover__next';
   nextBtn.textContent = '다음';
+  if (args.extraAction) {
+    const extraBtn = document.createElement('button');
+    extraBtn.type = 'button';
+    extraBtn.className = `field-popover__extra${args.extraAction.tone === 'danger' ? ' field-popover__extra--danger' : ''}`;
+    extraBtn.textContent = args.extraAction.label;
+    const { onClick } = args.extraAction;
+    extraBtn.addEventListener('click', () => {
+      closeFieldPopover();
+      onClick();
+    });
+    buttons.appendChild(extraBtn);
+  }
   if (args.onNext) buttons.append(cancelBtn, nextBtn, confirmBtn);
   else buttons.append(cancelBtn, confirmBtn);
   root.appendChild(buttons);
