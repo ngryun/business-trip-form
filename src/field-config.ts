@@ -15,8 +15,6 @@ export const TRANSPORT_OPTIONS = ['자가용', '버스', '기차/KTX', '항공',
 /** 첨부서류에 자주 쓰는 항목 — 입력창 위 토글 버튼으로 노출 */
 export const ATTACHMENT_PRESETS = ['주유영수증 1매', '하이패스영수증 1매'];
 export const DATETIME_MINUTE_STEP = 10;
-export const DATETIME_STEP_SECONDS = DATETIME_MINUTE_STEP * 60;
-export const DATETIME_HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => pad2(i));
 export const DATETIME_MINUTE_OPTIONS = Array.from({ length: 60 / DATETIME_MINUTE_STEP }, (_, i) => pad2(i * DATETIME_MINUTE_STEP));
 
 export const FIELD_CONFIGS: Record<string, WidgetConfig> = {

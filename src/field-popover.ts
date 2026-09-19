@@ -1,4 +1,4 @@
-import { shiftDate, suggestEnd, summarizeRange } from './date-range';
+import { shiftDate, suggestEnd, summarizeRange, todayDateValue } from './date-range';
 /**
  * 미리보기 위에서 누름틀을 클릭했을 때 떠오르는 입력 팝오버.
  *
@@ -845,8 +845,8 @@ function createRangeTabPane(picker: HTMLElement, title: string): HTMLElement {
   const heading = document.createElement('div');
   heading.className = 'date-range-heading';
   heading.textContent = title;
-  picker.querySelector('input[type="date"]')?.setAttribute('aria-label', `${title} 날짜`);
-  picker.querySelector('input[type="time"]')?.setAttribute('aria-label', `${title} 시간 (10분 단위)`);
+  picker.querySelector('.date-input')?.setAttribute('aria-label', `${title} 날짜`);
+  picker.querySelector('.time-input')?.setAttribute('aria-label', `${title} 시간 (10분 단위)`);
   pane.append(heading, picker);
   return pane;
 }
@@ -924,10 +924,3 @@ function positionNear(el: HTMLElement, anchor: { x: number; y: number }): void {
   el.style.visibility = '';
 }
 
-function todayDateValue(): string {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  const day = String(today.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
