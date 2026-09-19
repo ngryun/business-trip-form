@@ -23,6 +23,7 @@ import {
 import {
   ATTACHMENT_PRESETS,
   FIELD_CONFIGS,
+  GRADE_OPTIONS,
   TRANSPORT_OPTIONS,
   formatDateKR,
   formatDateTimeRange,
@@ -219,16 +220,15 @@ function setupAttachmentPresets(): void {
   sync();
 }
 
-/** 운임 탭 교통편 빠른 선택 칩 — 미리보기 팝오버의 선택지와 같은 목록을 쓴다. */
-let syncTransportPresetChips: (() => void) | null = null;
+/** 운임 탭 빠른 선택 칩 — 교통편(방향별)과 등급. 미리보기 팝오버의 선택지와 같은 목록을 쓴다. */
+let syncPresetChips: (() => void) | null = null;
 
-function setupTransportPresets(): void {
+function setupPresetChips(): void {
   const groups: Array<{ input: HTMLInputElement; chips: HTMLButtonElement[] }> = [];
-  formEl.querySelectorAll<HTMLElement>('[data-transport-presets]').forEach((wrap) => {
-    const direction = wrap.dataset.transportPresets ?? '';
-    const input = formEl.elements.namedItem(`${direction}교통편`);
+  const attach = (wrap: HTMLElement, inputName: string, options: readonly string[]): void => {
+    const input = formEl.elements.namedItem(inputName);
     if (!(input instanceof HTMLInputElement)) return;
-    const chips = TRANSPORT_OPTIONS.map((option) => {
+    const chips = options.map((option) => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'attachment-preset-chip';
@@ -246,7 +246,11 @@ function setupTransportPresets(): void {
     });
     groups.push({ input, chips });
     input.addEventListener('input', sync);
+  };
+  formEl.querySelectorAll<HTMLElement>('[data-transport-presets]').forEach((wrap) => {
+    attach(wrap, `${wrap.dataset.transportPresets ?? ''}교통편`, TRANSPORT_OPTIONS);
   });
+  formEl.querySelectorAll<HTMLElement>('[data-grade-presets]').forEach((wrap) => attach(wrap, '등급', GRADE_OPTIONS));
 
   function sync(): void {
     for (const { input, chips } of groups) {
@@ -257,7 +261,7 @@ function setupTransportPresets(): void {
       }
     }
   }
-  syncTransportPresetChips = sync;
+  syncPresetChips = sync;
   sync();
 }
 
@@ -633,7 +637,7 @@ function syncFormFromInline(label: string, hwpValue: string): void {
   if (label === '첨부서류') syncAttachmentPresetChips?.();
   // 미리보기에서 소속을 고쳤으면 동승자 「같음」 버튼도 다시 쓸 수 있게 된다
   if (label === '소속') syncPassengerOrgButtons?.();
-  if (label.endsWith('교통편')) syncTransportPresetChips?.();
+  if (label.endsWith('교통편')) syncPresetChips?.();
 }
 
 function setFormControlValue(
@@ -996,7 +1000,7 @@ async function initialize(): Promise<void> {
   setupReturnLocationDefaults();
   setupAttachmentPresets();
   setupPassengerOrgShortcuts();
-  setupTransportPresets();
+  setupPresetChips();
   setupLocalFormPersistence();
   updateRequiredBadges();
   document.getElementById('btn-submit-today')?.addEventListener('click', () => {
@@ -1226,9 +1230,13 @@ async function initialize(): Promise<void> {
     container: previewContainer,
     getFields: () => fields,
     cells: {
-      getRegions: () => getCellRegions(wasm),
+      getRegions: () => {
+        // "행 삭제"된 운임 행의 등급 칸은 비어 있으므로 편집 대상에서 뺀다
+        const deleted = getFareDeletedState();
+        return getCellRegions(wasm).filter((region) => region.kind !== 'text' || !region.fareDirection || !deleted[region.fareDirection]);
+      },
       getValue: (key) => getFormFieldValue(key),
-      getSuggestions: (key) => getPassengerOrgSuggestion(key),
+      getSuggestions: (key) => (key === '등급' ? { label: '등급', values: [...GRADE_OPTIONS] } : getPassengerOrgSuggestion(key)),
       commit: (key, value) => {
         if (!setFormFieldValue(key, value)) return;
         setStatus(value ? `"${value}" 을(를) 반영했습니다.` : '해당 칸을 비웠습니다.');
@@ -1551,7 +1559,7 @@ async function initialize(): Promise<void> {
     setDefaultSubmitDate();
     if (signatureInput) signatureInput.value = '';
     updateSignatureButtons();
-    syncTransportPresetChips?.();
+    syncPresetChips?.();
     updateRequiredBadges();
     try {
       applyCollectedValuesToPreview(undefined, { clearEmpty: true });

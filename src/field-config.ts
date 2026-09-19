@@ -14,6 +14,8 @@ export type WidgetConfig =
 export const TRANSPORT_OPTIONS = ['자가용', '버스', '기차/KTX', '항공', '지하철', '택시'];
 /** 첨부서류에 자주 쓰는 항목 — 입력창 위 토글 버튼으로 노출 */
 export const ATTACHMENT_PRESETS = ['주유영수증 1매', '하이패스영수증 1매'];
+/** 공무원 여비규정의 여비 등급 — 교직원은 거의 제2호이고 제1호는 예외적이라 제2호를 앞에 둔다. */
+export const GRADE_OPTIONS = ['제2호', '제1호'];
 export const DATETIME_MINUTE_STEP = 10;
 export const DATETIME_MINUTE_OPTIONS = Array.from({ length: 60 / DATETIME_MINUTE_STEP }, (_, i) => pad2(i * DATETIME_MINUTE_STEP));
 

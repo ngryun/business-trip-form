@@ -1,5 +1,5 @@
-/** 이름으로 개인인감 PNG를 생성한다. 기본값: 송명, 인 붙이기, 옅은 마모. */
-import { drawPersonalStamp as drawStamp, loadStampFont } from './personal-stamp.js';
+/** 이름으로 개인인감 PNG를 생성한다. 기본값: 연성(부드러운 붓글씨), 인 붙이기, 옅은 마모. */
+import { drawPersonalStamp as drawStamp, loadStampFont, STAMP_FONTS } from './personal-stamp.js';
 
 export interface StampGeneratorOptions {
   initialName: string;
@@ -23,9 +23,9 @@ function stampSeedFromName(name: string): number {
   return hash >>> 0;
 }
 
-/** 이름·끝글자·새김에 기본 질감을 더해 그린다. 생성기 미리보기와 자동 도장이 같은 결과를 낸다. */
-export function drawDefaultStyledStamp(canvas: HTMLCanvasElement, name: string, suffix = '인', style: 'yang' | 'eum' = 'yang'): void {
-  drawStamp(canvas, name, suffix, style, { ...STAMP_TEXTURE, seed: stampSeedFromName(name) });
+/** 이름·끝글자·새김·글씨체에 기본 질감을 더해 그린다. 생성기 미리보기와 자동 도장이 같은 결과를 낸다. */
+export function drawDefaultStyledStamp(canvas: HTMLCanvasElement, name: string, suffix = '인', style: 'yang' | 'eum' = 'yang', fontIdx = 0): void {
+  drawStamp(canvas, name, suffix, style, { ...STAMP_TEXTURE, seed: stampSeedFromName(name), fontIdx });
 }
 
 let currentDialog: HTMLElement | null = null;
@@ -43,7 +43,7 @@ export function openStampGenerator(opts: StampGeneratorOptions): void {
 
   const title = document.createElement('div');
   title.className = 'stamp-dialog__title';
-  title.textContent = '개인인감 만들기 · 송명';
+  title.textContent = '개인인감 만들기';
 
   // 이름 입력
   const nameLabel = document.createElement('label');
@@ -56,7 +56,11 @@ export function openStampGenerator(opts: StampGeneratorOptions): void {
   nameInput.placeholder = '예: 홍길동 / 洪吉童';
   nameLabel.appendChild(nameInput);
 
-  // 끝글자 / 새김 선택
+  // 글씨체 / 끝글자 / 새김 선택
+  const fontRow = createRadioRow('글씨체', 'stamp-font', STAMP_FONTS.map((font, index) => ({ value: String(index), label: font.label })), () => {
+    void loadStampFont(cleanName(), fontIdx()).then(redraw);
+    redraw();
+  });
   const suffixRow = createRadioRow('끝글자', 'stamp-suffix', [
     { value: '인', label: '인' },
     { value: '印', label: '印' },
@@ -88,7 +92,7 @@ export function openStampGenerator(opts: StampGeneratorOptions): void {
   generateBtn.textContent = '문서에 넣기';
   buttons.append(cancelBtn, generateBtn);
 
-  dialog.append(title, nameLabel, suffixRow.root, styleRow.root, previewWrap, buttons);
+  dialog.append(title, nameLabel, fontRow.root, suffixRow.root, styleRow.root, previewWrap, buttons);
   backdrop.appendChild(dialog);
   document.body.appendChild(backdrop);
   currentDialog = backdrop;
@@ -96,15 +100,18 @@ export function openStampGenerator(opts: StampGeneratorOptions): void {
   function cleanName(): string {
     return nameInput.value.replace(/\s+/g, '');
   }
+  function fontIdx(): number {
+    return Number(fontRow.getValue());
+  }
 
   function redraw(): void {
     const name = cleanName();
-    drawDefaultStyledStamp(canvas, name, suffixRow.getValue(), styleRow.getValue() as 'yang' | 'eum');
+    drawDefaultStyledStamp(canvas, name, suffixRow.getValue(), styleRow.getValue() as 'yang' | 'eum', fontIdx());
     generateBtn.disabled = name.length === 0;
   }
 
   nameInput.addEventListener('input', () => {
-    void loadStampFont(cleanName()).then(redraw);
+    void loadStampFont(cleanName(), fontIdx()).then(redraw);
     redraw();
   });
 
@@ -123,8 +130,8 @@ export function openStampGenerator(opts: StampGeneratorOptions): void {
     const name = cleanName();
     if (!name) return;
     generateBtn.disabled = true;
-    await loadStampFont(name);
-    drawDefaultStyledStamp(canvas, name, suffixRow.getValue(), styleRow.getValue() as 'yang' | 'eum');
+    await loadStampFont(name, fontIdx());
+    drawDefaultStyledStamp(canvas, name, suffixRow.getValue(), styleRow.getValue() as 'yang' | 'eum', fontIdx());
     canvas.toBlob((blob) => {
       if (!blob) return;
       const file = new File([blob], `도장_${name}.png`, { type: 'image/png' });
@@ -134,7 +141,7 @@ export function openStampGenerator(opts: StampGeneratorOptions): void {
   });
 
   redraw();
-  void loadStampFont(cleanName()).then(redraw);
+  void loadStampFont(cleanName(), fontIdx()).then(redraw);
 
   setTimeout(() => nameInput.focus(), 0);
 }

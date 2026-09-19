@@ -2,7 +2,8 @@ import type { WasmBridge } from '@/core/wasm-bridge';
 
 /** 기존 양식의 일반 셀도 사이드패널에서 편집한다. 행 삭제 후에는 좌표를 다시 찾는다. */
 export function applyExpenseFields(wasm: WasmBridge, values: Record<string, string>): void {
-  const anchor = wasm.getFieldList().find((field) => field.name === '소속');
+  const fields = wasm.getFieldList();
+  const anchor = fields.find((field) => field.name === '소속');
   const path = anchor?.location.path?.[0];
   if (!anchor || !path) throw new Error('정산 표를 찾지 못했습니다.');
   const sec = anchor.location.sectionIndex;
@@ -31,6 +32,20 @@ export function applyExpenseFields(wasm: WasmBridge, values: Record<string, stri
     write(passengers.row + i, 6, values[`동승자${i}소속`] ?? '');
     write(passengers.row + i, 9, values[`동승자${i}성명`] ?? '');
   }
+  // 운임표 「등 급」 열 — 갈 때·올 때 행에 같은 등급을 넣고, "행 삭제"된 방향은 비운다.
+  // 행은 그 방향의 일자 누름틀이 든 칸으로 찾고, 없으면 제목 행 바로 아래 두 행으로 본다.
+  const fareTitle = cells.find((cell) => cell.text === '운임');
+  const gradeHeader = fareTitle && cells.find((cell) => cell.row === fareTitle.row && cell.text === '등급');
+  if (!fareTitle || !gradeHeader) return;
+  (['갈때', '올때'] as const).forEach((direction, offset) => {
+    const cellIndex: unknown = fields.find((field) => field.name === `${direction}일자`)?.location.path?.[0]?.cellIndex;
+    const row = (typeof cellIndex === 'number' ? cells[cellIndex]?.row : undefined) ?? fareTitle.row + 1 + offset;
+    const gradeCell = cells.find((cell) => cell.row === row && cell.col === gradeHeader.col);
+    if (!gradeCell) return;
+    write(row, gradeHeader.col, values[`${direction}운임삭제`] === '1' ? '' : values.등급 ?? '');
+    // 양식은 두 행의 문단 정렬이 달라(윗행 가운데, 아랫행 왼쪽) 같은 값이 들쭉날쭉 보인다 — 둘 다 가운데로 맞춘다.
+    wasm.applyParaFormatInCell(sec, para, ctrl, gradeCell.index, 0, JSON.stringify({ alignment: 'center' }));
+  });
 }
 
 /** 운임 행 삭제 시 비우는 누름틀 이름 접미사. */

@@ -1,7 +1,7 @@
 /**
  * 누름틀이 아닌 "일반 표 칸"을 미리보기에서 직접 클릭해 편집하기 위한 좌표 계산.
  *
- * 식비 지급받은 금액 · 총 동승자수 · 동승자 명단(소속/성명) 은 양식에 누름틀이 없어
+ * 식비 지급받은 금액 · 총 동승자수 · 동승자 명단(소속/성명) · 운임 등급 은 양식에 누름틀이 없어
  * field-interaction 의 누름틀 hit-test 로는 잡히지 않는다. 여기서 표의 셀 bbox 를 구해
  * 클릭 가능한 영역 목록을 만들어 준다. 운임 행 삭제/복원은 "운 임" 제목 칸을 눌러 연다.
  *
@@ -25,6 +25,8 @@ export interface CellTextRegion {
   key: string;
   label: string;
   placeholder?: string;
+  /** 운임 행에 딸린 칸이면 그 방향 — "행 삭제"된 방향의 칸은 편집 대상에서 뺀다 */
+  fareDirection?: '갈때' | '올때';
   rect: CellPageRect;
 }
 
@@ -84,25 +86,32 @@ export function computeCellRegions(wasm: WasmBridge): CellRegion[] {
   const cellAt = (row: number, col: number): CellBbox | undefined =>
     bboxes.find((bbox) => bbox.row === row && bbox.col === col);
 
-  // 제목 칸(0열)의 글자로 행 위치를 찾는다 — 양식 구조가 바뀌어도 행 번호에 의존하지 않도록.
-  const rowOfLabel = (text: string): number | null => {
-    for (const bbox of bboxes) {
-      if (bbox.col !== 0) continue;
-      let cellText: string;
-      try {
-        cellText = wasm.getTextInCell(sec, para, ctrl, bbox.cellIdx, 0, 0, 100);
-      } catch {
-        continue;
-      }
-      if (cellText.replace(/\s/g, '') === text) return bbox.row;
+  const textOf = (bbox: CellBbox): string => {
+    try {
+      return wasm.getTextInCell(sec, para, ctrl, bbox.cellIdx, 0, 0, 100).replace(/\s/g, '');
+    } catch {
+      return '';
     }
-    return null;
+  };
+  // 제목 칸(0열)의 글자로 행 위치를 찾는다 — 양식 구조가 바뀌어도 행 번호에 의존하지 않도록.
+  const rowOfLabel = (text: string): number | null =>
+    bboxes.find((bbox) => bbox.col === 0 && textOf(bbox) === text)?.row ?? null;
+  const colOfHeader = (row: number, text: string): number | null =>
+    bboxes.find((bbox) => bbox.row === row && textOf(bbox) === text)?.col ?? null;
+  // 누름틀이 든 칸의 행 — 운임 행처럼 위치가 누름틀로 정해지는 곳에 쓴다.
+  const rowOfField = (name: string): number | null => {
+    try {
+      const cellIndex: unknown = wasm.getFieldList().find((field) => field.name === name)?.location.path?.[0]?.cellIndex;
+      return bboxes.find((bbox) => bbox.cellIdx === cellIndex)?.row ?? null;
+    } catch {
+      return null;
+    }
   };
 
   const regions: CellRegion[] = [];
-  const addText = (bbox: CellBbox | undefined, key: string, label: string, placeholder?: string): void => {
+  const addText = (bbox: CellBbox | undefined, key: string, label: string, placeholder?: string, fareDirection?: '갈때' | '올때'): void => {
     if (!bbox) return;
-    regions.push({ kind: 'text', key, label, placeholder, rect: toRect(bbox) });
+    regions.push({ kind: 'text', key, label, placeholder, fareDirection, rect: toRect(bbox) });
   };
 
   const mealRow = rowOfLabel('식비');
@@ -123,6 +132,14 @@ export function computeCellRegions(wasm: WasmBridge): CellRegion[] {
   const fareCell = fareRow !== null ? cellAt(fareRow, 0) : undefined;
   if (fareCell) {
     regions.push({ kind: 'fare', key: 'fare', label: '운임 행', rect: toRect(fareCell) });
+  }
+  // 운임표 「등 급」 열 — 갈 때·올 때 행이 폼의 등급 하나를 함께 쓴다.
+  const gradeCol = fareRow !== null ? colOfHeader(fareRow, '등급') : null;
+  if (fareRow !== null && gradeCol !== null) {
+    (['갈때', '올때'] as const).forEach((direction, offset) => {
+      const row = rowOfField(`${direction}일자`) ?? fareRow + 1 + offset;
+      addText(cellAt(row, gradeCol), '등급', '등급 (갈 때·올 때 공통)', '예: 제2호', direction);
+    });
   }
 
   return regions;

@@ -21,7 +21,12 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
-const FONTS = [{ fam: "Song Myung", w: 400 }];
+/* 글씨체 목록 — 둘 다 index.html 의 Google Fonts 링크로 불러온다(OFL). 기본은 연성(배달의민족 연성체): 부드러운 붓글씨가 손도장 느낌에 맞는다. */
+export const STAMP_FONTS = Object.freeze([
+  { fam: "Yeon Sung", w: 400, label: "연성 · 부드러운 붓글씨" },
+  { fam: "Song Myung", w: 400, label: "송명 · 단정한 명조" },
+]);
+const FONTS = STAMP_FONTS;
 function mulberry32(a){
   return function(){
     a = a + 0x6D2B79F5 | 0;
@@ -443,15 +448,15 @@ export const PERSONAL_STAMP_DEFAULTS = Object.freeze({
   color: '#b3272d', border: 52, pad: 40, rot: 0,
   ink: 16, grain: 62, rough: 14, seed: 20260730,
 });
-export async function loadStampFont(name) {
-  await ensureFont(FONTS[0], name + '인印');
+export async function loadStampFont(name, fontIdx = 0) {
+  await ensureFont(FONTS[fontIdx] || FONTS[0], name + '인印');
 }
 /**
  * @param {HTMLCanvasElement} canvas
  * @param {string} name
  * @param {string} [suffix]
  * @param {'yang'|'eum'} [style]
- * @param {Partial<typeof PERSONAL_STAMP_DEFAULTS>} [overrides] 마모(ink)·테두리 떨림(rough)·seed 등 기본값 덮어쓰기
+ * @param {Partial<typeof PERSONAL_STAMP_DEFAULTS>} [overrides] 글씨체(fontIdx)·마모(ink)·테두리 떨림(rough)·seed 등 기본값 덮어쓰기
  */
 export function drawPersonalStamp(canvas, name, suffix = '인', style = 'yang', overrides = {}) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });

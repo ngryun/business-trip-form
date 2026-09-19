@@ -401,13 +401,15 @@ html, body {
 }
 .stamp-dialog__radios {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 6px 10px;
 }
 .stamp-dialog__radio {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  white-space: nowrap;
   color: #111827;
   font-size: 13px;
   cursor: pointer;
