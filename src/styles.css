@@ -1143,7 +1143,9 @@ html, body {
 .field-popover__presets .field-popover__recent-chip { min-height: 32px; }
 .field-popover__recent-chip[aria-pressed="true"] { background: #dbeafe; border-color: #93c5fd; color: #1d4ed8; }
 .field-hint { font-size: 11px; color: #64748b; line-height: 1.5; margin: -2px 0 8px; }
-.passenger-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+/* 소속 라벨에만 「같음」 버튼이 있어 머리글 높이가 다르므로, subgrid로 머리글·입력 행을 두 칸이 공유한다. */
+.passenger-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 10px; }
+.passenger-row label { display: grid; grid-row: span 2; grid-template-rows: subgrid; row-gap: 0; align-items: center; }
 .passenger-row label, .passenger-row input { min-width: 0; }
 /* 동승자 소속 = 신청인 소속 (대부분 같은 학교) 을 한 번 클릭으로 넣는 버튼.
    입력창 폭을 잃지 않도록 라벨 줄에 올린다. */

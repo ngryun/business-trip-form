@@ -11,17 +11,24 @@
  * 출장지, 갈때일자, 갈때교통편, ... 등.
  */
 
+/**
+ * 「URL 공유」 버튼으로 만든 링크라는 표시. 외부(확장프로그램 등)에서 넘어온 값은 소속을 줄여 쓰지만,
+ * 공유 링크는 보낸 사람이 입력한 값 그대로 열려야 하므로 이 표시로 구분한다. 폼 값으로는 쓰지 않는다.
+ */
+const SHARE_MARKER_KEY = '공유';
+
 /** 빈 값이 아닌 항목만 모아 해시 프래그먼트를 만든다. path 만 남기고 hash 만 갱신한다. */
 export function buildShareUrl(values: Record<string, string>): string {
   const params = new URLSearchParams();
+  params.append(SHARE_MARKER_KEY, '1');
   for (const [key, value] of Object.entries(values)) {
     const trimmed = (value ?? '').trim();
     if (!trimmed) continue;
     params.append(key, trimmed);
   }
   const base = `${window.location.origin}${window.location.pathname}`;
-  const qs = params.toString();
-  return qs ? `${base}#${qs}` : base;
+  if ([...params.keys()].length === 1) return base;
+  return `${base}#${params.toString()}`;
 }
 
 /** 해시 우선, 과거 공유 URL 과의 호환을 위해 쿼리스트링도 읽는다. */
@@ -40,15 +47,20 @@ function readShareParams(): URLSearchParams | null {
 export function readUrlFormValues(): Record<string, string> {
   const out: Record<string, string> = {};
   readShareParams()?.forEach((value, key) => {
-    out[key] = value;
+    if (key !== SHARE_MARKER_KEY) out[key] = value;
   });
   return out;
+}
+
+/** 현재 URL 이 이 앱의 「URL 공유」 버튼으로 만든 링크인지. */
+export function isShareButtonUrl(): boolean {
+  return readShareParams()?.has(SHARE_MARKER_KEY) ?? false;
 }
 
 /** URL 에 공유 값이 있는지 가볍게 검사. 키가 하나라도 있어야 true. */
 export function hasUrlFormValues(): boolean {
   let count = 0;
-  readShareParams()?.forEach(() => { count += 1; });
+  readShareParams()?.forEach((_, key) => { if (key !== SHARE_MARKER_KEY) count += 1; });
   return count > 0;
 }
 

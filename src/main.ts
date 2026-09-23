@@ -18,6 +18,7 @@ import {
   clearUrlFormValues,
   copyTextToClipboard,
   hasUrlFormValues,
+  isShareButtonUrl,
   readUrlFormValues,
 } from './url-share';
 import {
@@ -659,8 +660,11 @@ function setFormControlValue(
 function applyUrlFormValuesToInputs(): boolean {
   if (!hasUrlFormValues()) return false;
   const values = readUrlFormValues();
+  // 「URL 공유」 링크는 보낸 사람이 입력한 그대로 연다 — 소속 줄이기는 외부에서 넘어온 값에만.
+  const shortenOrg = !isShareButtonUrl();
   let applied = 0;
-  for (const [name, value] of Object.entries(values)) {
+  for (const [name, rawValue] of Object.entries(values)) {
+    const value = shortenOrg && ORG_KEY.test(name) ? shortenOrgName(rawValue) : rawValue;
     const control = formEl.elements.namedItem(name);
     if (!control) continue;
     if (control instanceof RadioNodeList) {
@@ -676,6 +680,20 @@ function applyUrlFormValuesToInputs(): boolean {
     }
   }
   return applied > 0;
+}
+
+/** 신청인·동승자 소속 칸 */
+const ORG_KEY = /^(동승자[1-4])?소속$/;
+
+/**
+ * 외부(확장프로그램 등)에서 URL 로 받은 소속은 "강원특별자치도고성교육지원청 교육과" 처럼 부서까지 붙어 칸에 비해 긴 경우가 많아,
+ * 기본값은 첫 띄어쓰기 앞(기관명)까지만 쓴다. 원래 전체 값은 소속 "최근 입력" 칩에 남겨 다시 고를 수 있게 한다.
+ */
+function shortenOrgName(value: string): string {
+  const full = value.trim();
+  const short = full.split(/\s+/)[0] ?? '';
+  if (short !== full) pushRecentValue('소속', full);
+  return short;
 }
 
 function ensureSelectOption(select: HTMLSelectElement, value: string): void {
