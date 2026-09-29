@@ -14,6 +14,7 @@ import { createDefaultStamp, openStampGenerator } from './stamp-generator';
 import { printPdf, type PdfSaveResult } from './print-pdf';
 import { pushRecentValue } from './recent-values';
 import { isPlaceLookupEnabled, lookupPlaceCity, type PlaceCity } from './kakao-places';
+import { joinCities, splitPlaces } from './place-region';
 import {
   buildShareUrl,
   clearUrlFormValues,
@@ -843,22 +844,25 @@ async function applyPlaceCity(sourceName: string): Promise<void> {
   const query = source.value.trim();
   if (!query) return;
 
-  let found: PlaceCity | null;
+  let found: PlaceCity[];
   try {
-    found = await lookupPlaceCity(query);
+    const results = await Promise.all(splitPlaces(query).map((place) => lookupPlaceCity(place)));
+    found = results.filter((result): result is PlaceCity => result !== null);
   } catch (err) {
     console.error(err);
     return;
   }
   // 검색하는 동안 입력이 바뀌었거나 사용자가 직접 칸을 채웠으면 결과를 버린다.
-  if (source.value.trim() !== query || !found || target.disabled) return;
+  if (source.value.trim() !== query || found.length === 0 || target.disabled) return;
   const previousAutoValue = autoPlaceCities.get(targetName);
   if (target.value && target.value !== previousAutoValue) return;
 
-  autoPlaceCities.set(targetName, found.city);
-  if (setFormFieldValue(targetName, found.city)) {
+  const city = joinCities(found.map((result) => result.city));
+  autoPlaceCities.set(targetName, city);
+  if (setFormFieldValue(targetName, city)) {
     const label = targetName.endsWith('출발지') ? '출발지' : '도착지';
-    setStatus(`${label}를 "${found.city}"(으)로 채웠습니다 — ${found.placeName} · ${found.address}`);
+    const places = found.map((result) => `${result.placeName} · ${result.address}`).join(' / ');
+    setStatus(`${label}를 "${city}"(으)로 채웠습니다 — ${places}`);
   }
 }
 

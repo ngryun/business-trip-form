@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cityFromAddress } from '../src/place-region.ts';
+import { cityFromAddress, joinCities, splitPlaces } from '../src/place-region.ts';
+
+test('여러 장소는 쉼표 등으로 나누고, 도시는 겹치지 않게 잇는다', () => {
+  assert.deepEqual(splitPlaces('삼척다목적체육관, 삼척종합운동장'), ['삼척다목적체육관', '삼척종합운동장']);
+  assert.deepEqual(splitPlaces('속초 카시아속초호텔'), ['속초 카시아속초호텔']);
+  assert.deepEqual(splitPlaces(' , '), []);
+  assert.equal(joinCities(['삼척', '삼척']), '삼척');
+  assert.equal(joinCities(['삼척', '동해', '삼척']), '삼척·동해');
+});
 
 test('도 지역은 시·군 이름에서 시/군을 뗀다', () => {
   assert.equal(cityFromAddress('강원특별자치도 고성군 간성읍 신안리 123'), '고성');

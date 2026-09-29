@@ -7,6 +7,16 @@
  * 카카오 주소는 시·도를 줄여 쓰기도("경북", "서울") 하고 온전히 쓰기도("강원특별자치도") 해서 둘 다 받는다.
  */
 
+/** "삼척다목적체육관, 삼척종합운동장" 처럼 여러 장소를 한 칸에 쓴 경우 — 장소별로 나눠야 검색된다. */
+export function splitPlaces(text: string): string[] {
+  return text.split(/[,，、;/]/).map((part) => part.trim()).filter(Boolean);
+}
+
+/** 장소별 도시를 한 칸 값으로 — 같은 도시는 한 번만, 다른 도시는 "삼척·동해" 처럼 잇는다. */
+export function joinCities(cities: string[]): string {
+  return [...new Set(cities.filter(Boolean))].join('·');
+}
+
 const METRO_CITIES = new Set(['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종']);
 
 export function cityFromAddress(address: string): string {
