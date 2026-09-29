@@ -815,6 +815,7 @@ function setupReturnLocationDefaults(): void {
  * 소속·출장지를 지도에서 찾아 그 장소가 있는 도시명을 운임 출발지·도착지에 채운다.
  * 예: "강원특별자치도고성교육지원청" → 출발지 "고성", "삼척다목적체육관" → 도착지 "삼척".
  * 비어 있거나 전에 자동으로 채운 칸만 바꾸고, 사용자가 직접 쓴 값은 그대로 둔다.
+ * URL·저장본으로 채워진 값도 시작할 때 한 번 찾는다.
  */
 function setupPlaceCityLookup(): void {
   if (!isPlaceLookupEnabled()) return;
@@ -829,6 +830,8 @@ function setupPlaceCityLookup(): void {
     // 인라인 편집은 input 만 보내므로 input 은 입력이 멈출 때까지 기다리고, change(포커스 이동)는 바로 찾는다.
     source.addEventListener('input', () => schedule(PLACE_LOOKUP_DELAY_MS));
     source.addEventListener('change', () => schedule(0));
+    // URL·저장본으로 채워진 값은 입력 이벤트가 없으므로 시작할 때 한 번 찾는다 (빈 칸만 채운다).
+    void applyPlaceCity(sourceName);
   }
 }
 
