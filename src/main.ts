@@ -15,6 +15,7 @@ import { printPdf, type PdfSaveResult } from './print-pdf';
 import { pushRecentValue } from './recent-values';
 import { isPlaceLookupEnabled, lookupPlaceCity, type PlaceCity } from './kakao-places';
 import { joinCities, splitPlaces } from './place-region';
+import { defaultSubmitDate } from './date-range';
 import {
   buildShareUrl,
   clearUrlFormValues,
@@ -614,9 +615,23 @@ function normalizeStoredSignatureStamp(raw: unknown): StoredSignatureStamp | nul
 }
 
 function setDefaultSubmitDate(): void {
+  const end = formEl.elements.namedItem('종료일시') as HTMLInputElement | null;
+  applySubmitDateDefault(end?.value.slice(0, 10) ?? '');
+}
+
+/**
+ * 제출날짜 기본값은 오늘, 출장 종료일이 오늘 이후면 종료 다음날 (defaultSubmitDate).
+ * 비었거나 전에 자동으로 넣은 날짜·오늘 날짜일 때만 바꾸고, 직접 고른 날짜는 그대로 둔다.
+ */
+function applySubmitDateDefault(endDate: string): void {
   const input = formEl.elements.namedItem('제출날짜') as HTMLInputElement | null;
-  if (!input || input.value) return;
-  input.value = todayDateValue();
+  if (!input) return;
+  const today = todayDateValue();
+  const previousAuto = autoTravelDates.get('제출날짜');
+  if (input.value && input.value !== previousAuto && input.value !== today) return;
+  const next = defaultSubmitDate(endDate, today);
+  input.value = next;
+  autoTravelDates.set('제출날짜', next);
 }
 
 function collectRawFormValues(): Record<string, string> {
@@ -912,6 +927,7 @@ function applyTravelDateDefault(control: HTMLElement): void {
   if (!targetName) return;
 
   const date = dateTimeControllers.get(control)?.getDate();
+  if (sourceName === '종료일시') applySubmitDateDefault(date ?? '');
   const target = formEl.elements.namedItem(targetName) as HTMLInputElement | null;
   if (!target) return;
   if (!date) {

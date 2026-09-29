@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { shiftDate, suggestEnd, summarizeRange } from '../src/date-range.ts';
+import { defaultSubmitDate, shiftDate, suggestEnd, summarizeRange } from '../src/date-range.ts';
 test('시작일 이동 시 기존 숙박 일수와 종료 시간을 유지한다', () => {
   assert.equal(suggestEnd('2026-12-31T09:00', '2026-09-08T09:00', '2026-09-09T17:30'), '2027-01-01T17:30');
   assert.equal(suggestEnd('2026-09-08T13:00', '2026-09-08T09:00', '2026-09-08T17:30'), '2026-09-08T17:30');
@@ -15,4 +15,11 @@ test('윤년과 월말 이동 및 출장 요약', () => {
   assert.equal(shiftDate('2028-02-29', 1), '2028-03-01');
   assert.match(summarizeRange('2026-09-08T09:00', '2026-09-09T18:30'), /1일 9시간 30분/);
   assert.match(summarizeRange('2026-09-08T09:00', '2026-09-07T18:00'), /시작보다 빠릅니다/);
+});
+test('제출날짜 기본값은 오늘, 출장이 오늘 이후에 끝나면 종료 다음날', () => {
+  assert.equal(defaultSubmitDate('', '2026-09-29'), '2026-09-29');
+  assert.equal(defaultSubmitDate('2026-09-19', '2026-09-29'), '2026-09-29');
+  assert.equal(defaultSubmitDate('2026-09-29', '2026-09-29'), '2026-09-29');
+  assert.equal(defaultSubmitDate('2026-09-30', '2026-09-29'), '2026-10-01');
+  assert.equal(defaultSubmitDate('2026-12-31', '2026-09-29'), '2027-01-01');
 });

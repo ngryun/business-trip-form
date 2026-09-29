@@ -23,6 +23,10 @@ export function summarizeRange(start: string, end: string): string {
   const weekday = (value: string): string => ['일', '월', '화', '수', '목', '금', '토'][new Date(`${value.slice(0, 10)}T00:00:00Z`).getUTCDay()];
   return `${Number(start.slice(5, 7))}.${Number(start.slice(8, 10))}(${weekday(start)}) → ${Number(end.slice(5, 7))}.${Number(end.slice(8, 10))}(${weekday(end)}) · ${duration}`;
 }
+/** 제출날짜 기본값 — 오늘, 단 출장이 아직 끝나지 않았으면(종료일이 오늘 이후) 종료 다음날. */
+export function defaultSubmitDate(endDate: string, today = todayDateValue()): string {
+  return endDate && endDate > today ? shiftDate(endDate, 1) : today;
+}
 /** 오늘 날짜를 기기 시간대 기준 `YYYY-MM-DD` 로 */
 export function todayDateValue(now = new Date()): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
