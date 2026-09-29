@@ -13,6 +13,7 @@ import { SignatureStampManager, type StoredSignatureStamp } from './signature-st
 import { createDefaultStamp, openStampGenerator } from './stamp-generator';
 import { printPdf, type PdfSaveResult } from './print-pdf';
 import { pushRecentValue } from './recent-values';
+import { isPlaceLookupEnabled, lookupPlaceCity, type PlaceCity } from './kakao-places';
 import {
   buildShareUrl,
   clearUrlFormValues,
@@ -84,11 +85,19 @@ const RETURN_LOCATION_DEFAULTS: Record<string, string> = {
   갈때출발지: '올때도착지',
   갈때도착지: '올때출발지',
 };
+/** 지도 검색으로 도시명을 찾아 채울 곳 — 소속은 갈 때 출발지, 출장지는 갈 때 도착지 (올 때는 위 규칙이 거꾸로 채운다) */
+const PLACE_CITY_DEFAULTS: Record<string, string> = {
+  소속: '갈때출발지',
+  출장지: '갈때도착지',
+};
+const PLACE_LOOKUP_DELAY_MS = 800;
 const dateTimeControllers = new WeakMap<HTMLElement, DateTimePickerController>();
 /** 사이드바 출장 일시(시작/종료)를 한 묶음으로 감싸는 공통 UI — 미리보기 팝오버와 동작을 공유한다. */
 let dateTimeRangeChrome: RangeChromeHandle | null = null;
 const autoTravelDates = new Map<string, string>();
 const autoReturnLocations = new Map<string, string>();
+/** 지도 검색으로 채운 출발지·도착지 값 — 사용자가 직접 고친 값은 덮어쓰지 않으려고 기억한다. */
+const autoPlaceCities = new Map<string, string>();
 let liveDateTimePreviewHandler: (() => void) | null = null;
 /** 인라인 편집 핸들 — 편집 가능 칸 마커 갱신/토글에 쓴다 (부착 전에는 null). */
 let inlineEdit: InlineEditHandle | null = null;
@@ -112,6 +121,7 @@ interface PreviewApplyOptions {
 }
 
 interface SavedFormState {
+  autoPlaceCities?: Record<string, string>;
   autoReturnLocations?: Record<string, string>;
   autoTravelDates?: Record<string, string>;
   updatedAt?: string;
@@ -499,12 +509,17 @@ function restoreFormState(): boolean {
   for (const [name, value] of Object.entries(saved.autoReturnLocations ?? {})) {
     autoReturnLocations.set(name, value);
   }
+  autoPlaceCities.clear();
+  for (const [name, value] of Object.entries(saved.autoPlaceCities ?? {})) {
+    autoPlaceCities.set(name, value);
+  }
   return true;
 }
 
 function saveFormState(): void {
   try {
     localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify({
+      autoPlaceCities: Object.fromEntries(autoPlaceCities),
       autoReturnLocations: Object.fromEntries(autoReturnLocations),
       autoTravelDates: Object.fromEntries(autoTravelDates),
       updatedAt: new Date().toISOString(),
@@ -796,6 +811,54 @@ function setupReturnLocationDefaults(): void {
   }
 }
 
+/**
+ * 소속·출장지를 지도에서 찾아 그 장소가 있는 도시명을 운임 출발지·도착지에 채운다.
+ * 예: "강원특별자치도고성교육지원청" → 출발지 "고성", "삼척다목적체육관" → 도착지 "삼척".
+ * 비어 있거나 전에 자동으로 채운 칸만 바꾸고, 사용자가 직접 쓴 값은 그대로 둔다.
+ */
+function setupPlaceCityLookup(): void {
+  if (!isPlaceLookupEnabled()) return;
+  for (const sourceName of Object.keys(PLACE_CITY_DEFAULTS)) {
+    const source = formEl.elements.namedItem(sourceName);
+    if (!(source instanceof HTMLInputElement)) continue;
+    let timer = 0;
+    const schedule = (delay: number): void => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => { void applyPlaceCity(sourceName); }, delay);
+    };
+    // 인라인 편집은 input 만 보내므로 input 은 입력이 멈출 때까지 기다리고, change(포커스 이동)는 바로 찾는다.
+    source.addEventListener('input', () => schedule(PLACE_LOOKUP_DELAY_MS));
+    source.addEventListener('change', () => schedule(0));
+  }
+}
+
+async function applyPlaceCity(sourceName: string): Promise<void> {
+  const targetName = PLACE_CITY_DEFAULTS[sourceName];
+  const source = formEl.elements.namedItem(sourceName) as HTMLInputElement | null;
+  const target = formEl.elements.namedItem(targetName) as HTMLInputElement | null;
+  if (!source || !target) return;
+  const query = source.value.trim();
+  if (!query) return;
+
+  let found: PlaceCity | null;
+  try {
+    found = await lookupPlaceCity(query);
+  } catch (err) {
+    console.error(err);
+    return;
+  }
+  // 검색하는 동안 입력이 바뀌었거나 사용자가 직접 칸을 채웠으면 결과를 버린다.
+  if (source.value.trim() !== query || !found || target.disabled) return;
+  const previousAutoValue = autoPlaceCities.get(targetName);
+  if (target.value && target.value !== previousAutoValue) return;
+
+  autoPlaceCities.set(targetName, found.city);
+  if (setFormFieldValue(targetName, found.city)) {
+    const label = targetName.endsWith('출발지') ? '출발지' : '도착지';
+    setStatus(`${label}를 "${found.city}"(으)로 채웠습니다 — ${found.placeName} · ${found.address}`);
+  }
+}
+
 function syncAllDateTimeControlsToHidden(): void {
   for (const control of formEl.querySelectorAll<HTMLElement>('[data-datetime-picker]')) {
     dateTimeControllers.get(control)?.syncHidden();
@@ -1016,6 +1079,7 @@ async function initialize(): Promise<void> {
   setDefaultSubmitDate();
   setupDateTimeControls();
   setupReturnLocationDefaults();
+  setupPlaceCityLookup();
   setupAttachmentPresets();
   setupPassengerOrgShortcuts();
   setupPresetChips();
@@ -1570,6 +1634,7 @@ async function initialize(): Promise<void> {
     syncPassengerOrgButtons?.();
     autoTravelDates.clear();
     autoReturnLocations.clear();
+    autoPlaceCities.clear();
     clearSavedFormState();
     // 일시 picker 는 hidden input 의 defaultValue 가 이전 입력값으로 굳어버려 formEl.reset() 만으로는
     // 비워지지 않는다. 명시적으로 controller + attribute 를 함께 초기화한다.

@@ -36,6 +36,9 @@ jobs:
 
       - name: Build
         run: pnpm build
+        env:
+          # 카카오맵 JavaScript 키 (저장소 Settings → Variables). 없으면 출발지·도착지 자동 검색이 꺼진다.
+          VITE_KAKAO_JS_KEY: ${{ vars.KAKAO_JS_KEY }}
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
