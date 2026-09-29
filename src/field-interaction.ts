@@ -400,20 +400,45 @@ export function attachInlineEditing(deps: InlineEditDeps): InlineEditHandle {
     const entry = entries.find((en) => en.fieldId === fieldId) ?? entries[0];
     const parsedInitial = parseFromHWP(label, entry?.value ?? '');
     const initial = label === '제출날짜' && !parsedInitial ? todayDateValue() : parsedInitial;
+
+    // 운임 칸(갈때·올때 일자/교통편/출발지/도착지)에서는 「운 임」 제목 칸까지 가지 않고도
+    // 바로 그 행을 지우거나 되살릴 수 있게 부가 버튼을 붙인다.
+    const fareDirection = fareDirectionOfLabel(label);
+    const fareDeleted = fareDirection && cells ? cells.getFareDeleted()[fareDirection] : false;
+    const restoreFareRowIfDeleted = (): void => {
+      if (fareDirection && fareDeleted && cells) cells.toggleFare(fareDirection);
+    };
     showFieldPopover({
       label,
       initialValue: initial,
       anchor,
       recentValues: RECENT_TRACKED_LABELS.has(label) ? getRecentValues(label) : undefined,
+      extraAction: fareDirection && cells
+        ? {
+          label: fareDeleted ? '행 복원' : '행 삭제',
+          tone: fareDeleted ? 'default' : 'danger',
+          onClick: () => cells.toggleFare(fareDirection),
+        }
+        : undefined,
       onConfirm: (raw) => {
+        // 지워진 행의 칸에 값을 넣으면 행을 먼저 되살린다 — 그래야 폼 입력이 활성화되어 값이 유지된다.
+        restoreFareRowIfDeleted();
         commitSingleField(label, raw);
       },
       onNext: (raw) => {
+        restoreFareRowIfDeleted();
         commitSingleField(label, raw);
         openNextEmptyField(fieldId);
       },
       onCancel: () => undefined,
     });
+  }
+
+  function fareDirectionOfLabel(label: string): FareDirection | null {
+    for (const direction of ['갈때', '올때'] as FareDirection[]) {
+      if (label.startsWith(direction)) return direction;
+    }
+    return null;
   }
 
   function commitSingleField(label: string, raw: string): boolean {
