@@ -108,6 +108,8 @@ export function formatDateTimeCompactKR(value: string): string {
  * 잘라버려서(글꼴 크기·정렬·줄바꿈 무관), 시작·종료를 시작일시 누름틀 하나에 모아 넣는다.
  * - 같은 날: 종료는 시간만   → `2026. 5.7 14:00 ~ 18:00`
  * - 다른 날: 종료는 연도 생략 → `2026. 5.7 14:00 ~ 5.8 18:00`
+ * - 해를 넘김: 종료에도 연도 → `2026. 12.31 14:00 ~ 2027. 1.1 18:00`
+ *   (연도를 빼면 parseDateTimeRange 가 종료를 시작 연도로 읽어 미리보기에서 고칠 때 1년 앞당겨진다)
  */
 export function formatDateTimeRange(startValue: string, endValue: string): string {
   const start = getDateTimeParts(startValue);
@@ -116,9 +118,10 @@ export function formatDateTimeRange(startValue: string, endValue: string): strin
   const end = getDateTimeParts(endValue);
   if (!end) return startStr;
   const sameDay = start.year === end.year && start.month === end.month && start.day === end.day;
+  const endDateTime = `${Number(end.month)}.${Number(end.day)} ${end.hour}:${end.minute}`;
   const endStr = sameDay
     ? `${end.hour}:${end.minute}`
-    : `${Number(end.month)}.${Number(end.day)} ${end.hour}:${end.minute}`;
+    : start.year === end.year ? endDateTime : `${end.year}. ${endDateTime}`;
   return `${startStr} ~ ${endStr}`;
 }
 
