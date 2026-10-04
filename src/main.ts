@@ -479,7 +479,17 @@ function isSameApplicantInfo(a: SavedApplicantInfo, b: SavedApplicantInfo): bool
   return APPLICANT_FIELDS.every((field) => a[field] === b[field]);
 }
 
-function restoreFormState(): boolean {
+/**
+ * 링크(확장프로그램·「URL 공유」)로 새 출장을 열 때 저장본에서 이어 쓰는 칸 — 신청인 정보와 매번 같기 쉬운 선택.
+ * 나머지(출장지·일시·운임·식비·동승자·첨부서류·제출날짜·운임 행 삭제)는 출장마다 달라 빈 칸에서 시작한다.
+ */
+const URL_CARRY_OVER_KEYS: ReadonlySet<string> = new Set(['소속', '직급', '성명', '등급', '갈때교통편', '올때교통편']);
+
+/**
+ * 저장된 입력을 폼에 되살린다. keepOnly 를 주면 그 칸만 되살리고 자동 입력 기록은 버린다 —
+ * 링크로 연 새 출장에 지난 출장의 값이 섞여 빈칸 확인에도 걸리지 않은 채 찍히던 문제를 막는다.
+ */
+function restoreFormState(keepOnly?: ReadonlySet<string>): boolean {
   let saved: SavedFormState | null = null;
   try {
     const raw = localStorage.getItem(FORM_STORAGE_KEY);
@@ -490,32 +500,44 @@ function restoreFormState(): boolean {
   if (!saved?.values) return false;
 
   for (const [name, value] of Object.entries(saved.values)) {
-    const control = formEl.elements.namedItem(name);
-    if (!control) continue;
-    if (control instanceof RadioNodeList) {
-      control.value = value;
-    } else if (
-      control instanceof HTMLInputElement ||
-      control instanceof HTMLSelectElement ||
-      control instanceof HTMLTextAreaElement
-    ) {
-      setFormControlValue(control, value);
-    }
+    if (keepOnly && !keepOnly.has(name)) continue;
+    const control = findValueControl(name);
+    if (control) setFormControlValue(control, value);
   }
 
   autoTravelDates.clear();
+  autoReturnLocations.clear();
+  autoPlaceCities.clear();
+  if (keepOnly) return true;
   for (const [name, value] of Object.entries(saved.autoTravelDates ?? {})) {
     autoTravelDates.set(name, value);
   }
-  autoReturnLocations.clear();
   for (const [name, value] of Object.entries(saved.autoReturnLocations ?? {})) {
     autoReturnLocations.set(name, value);
   }
-  autoPlaceCities.clear();
   for (const [name, value] of Object.entries(saved.autoPlaceCities ?? {})) {
     autoPlaceCities.set(name, value);
   }
   return true;
+}
+
+type ValueControl = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+
+/** 값을 넣을 수 없는 input — 파일 선택칸은 빈 문자열이 아닌 값을 넣으면 예외가 난다. */
+const NON_VALUE_INPUT_TYPES = new Set(['file', 'button', 'submit', 'reset', 'image']);
+
+/**
+ * name 이 정확히 같은 값 입력칸을 찾는다. elements.namedItem 은 id 로도 찾아서, 링크에
+ * `#signature-image=x` 같은 키가 있으면 파일 선택칸에 값을 넣다 예외가 나 시작이 통째로 멈췄다.
+ */
+function findValueControl(name: string): ValueControl | null {
+  for (const el of Array.from(formEl.elements)) {
+    if (!(el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement)) continue;
+    if (el.name !== name) continue;
+    if (el instanceof HTMLInputElement && NON_VALUE_INPUT_TYPES.has(el.type)) continue;
+    return el;
+  }
+  return null;
 }
 
 function saveFormState(): void {
@@ -683,34 +705,20 @@ function setFormControlValue(
 }
 
 /**
- * URL 쿼리스트링의 값을 폼 input 들에 채워 넣는다. setupDateTimeControls 보다 먼저 호출해서
- * 일시 picker 가 초기화 시 hidden input 값을 읽어가게 해야 한다.
- *
- * 반환값: 채워 넣은 키가 하나라도 있으면 true (이후 미리보기 자동 반영 트리거에 사용).
+ * URL 해시(또는 예전 쿼리스트링)의 값 중 폼에 있는 칸에 들어갈 것만 고른다.
+ * 폼에 없는 키뿐인 링크는 빈 목록 — 그때는 저장본을 평소처럼 모두 되살린다.
  */
-function applyUrlFormValuesToInputs(): boolean {
-  if (!hasUrlFormValues()) return false;
-  const values = readUrlFormValues();
+function readUrlFormEntries(): Array<[ValueControl, string]> {
+  if (!hasUrlFormValues()) return [];
   // 「URL 공유」 링크는 보낸 사람이 입력한 그대로 연다 — 소속 줄이기는 외부에서 넘어온 값에만.
   const shortenOrg = !isShareButtonUrl();
-  let applied = 0;
-  for (const [name, rawValue] of Object.entries(values)) {
-    const value = shortenOrg && ORG_KEY.test(name) ? shortenOrgName(rawValue) : rawValue;
-    const control = formEl.elements.namedItem(name);
+  const entries: Array<[ValueControl, string]> = [];
+  for (const [name, rawValue] of Object.entries(readUrlFormValues())) {
+    const control = findValueControl(name);
     if (!control) continue;
-    if (control instanceof RadioNodeList) {
-      control.value = value;
-      applied += 1;
-    } else if (
-      control instanceof HTMLInputElement ||
-      control instanceof HTMLSelectElement ||
-      control instanceof HTMLTextAreaElement
-    ) {
-      setFormControlValue(control, value);
-      applied += 1;
-    }
+    entries.push([control, shortenOrg && ORG_KEY.test(name) ? shortenOrgName(rawValue) : rawValue]);
   }
-  return applied > 0;
+  return entries;
 }
 
 /** 신청인·동승자 소속 칸 */
@@ -1095,9 +1103,12 @@ async function initialize(): Promise<void> {
   registerFontFaces();
   setupPanelToggle();
   setupFormTabs(formEl);
-  const restoredFormState = restoreFormState();
-  // URL 쿼리스트링은 localStorage 복원본보다 우선한다 — 공유받은 URL 의 의도를 존중.
-  const urlFormApplied = applyUrlFormValuesToInputs();
+  // 링크로 열면 새 출장이다 — 저장본에서는 신청인 정보 등(URL_CARRY_OVER_KEYS)만 이어 쓰고, URL 값이 그보다 우선한다.
+  // setupDateTimeControls 보다 먼저 채워야 일시 picker 가 초기화 때 hidden input 값을 읽어 간다.
+  const urlEntries = readUrlFormEntries();
+  const urlFormApplied = urlEntries.length > 0;
+  const restoredFormState = restoreFormState(urlFormApplied ? URL_CARRY_OVER_KEYS : undefined);
+  for (const [control, value] of urlEntries) setFormControlValue(control, value);
   setupFareRowControls();
   setDefaultSubmitDate();
   setupDateTimeControls();
@@ -1114,6 +1125,12 @@ async function initialize(): Promise<void> {
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   setupApplicantInfoStorage();
+  if (urlFormApplied) {
+    // 링크 값은 바로 저장하고 주소창에서 지운다 — 뒤의 양식 로드가 실패해도 주소에 링크가 남아
+    // 새로고침마다 같은 실패를 되풀이하지 않고, 새로고침하면 저장본(= 이 링크의 값)으로 다시 열린다.
+    saveFormState();
+    clearUrlFormValues();
+  }
   await preloadFonts();
 
   // 1) HWP 양식 fetch + 로드
@@ -1222,11 +1239,7 @@ async function initialize(): Promise<void> {
 
   if (urlFormApplied) {
     // 공유 URL 의 의도를 한 번 더 명확히 — 폼에 반영한 값을 그대로 미리보기에 적용한다.
-    // 이후 자동 저장 로직이 URL 값을 localStorage 에도 보관하므로 새로고침해도 유지된다.
     applyCollectedValuesToPreview('공유 URL 의 값을 양식에 채웠습니다.');
-    saveFormState();
-    // 주소창의 ?쿼리는 한 번 적용 후 깨끗이 — 두 번째 새로고침부터는 localStorage 가 권위.
-    clearUrlFormValues();
   } else if (restoredFormState) {
     applyCollectedValuesToPreview('저장된 입력 내용을 복원했습니다.');
   }
