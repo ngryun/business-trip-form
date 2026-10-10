@@ -123,7 +123,12 @@ function outlinePath(ctx, rx, ry, n, rough, fbm, phase, ampBase){
 /* ============================================================
    글자 배치
    ============================================================ */
-function layoutCells(n, mode){
+/* 글자 n개를 넣을 격자. 먼저 열 수(cols)를 정한 뒤,
+   trad(전통 세로쓰기)면 열마다 글자 수를 세어 오른쪽 열부터 위→아래로 채우고,
+   아니면 행마다 글자 수를 세어 왼쪽 위부터 읽는 순서인 Z자(→ 다음 ↓)로 채운다.
+   글자가 고르게 나뉘지 않으면 앞줄부터 하나씩 더 받고, 짧은 줄은 buildCells 에서 가운데로 모은다.
+   반환값의 cols·rows 는 전체 격자 크기, counts 는 줄(열 또는 행)마다의 글자 수. */
+function layoutCells(n, mode, trad){
   let cols;
   if(mode==='horizontal') cols=n;
   else if(mode==='vertical') cols=1;
@@ -135,10 +140,12 @@ function layoutCells(n, mode){
     else cols=Math.ceil(Math.sqrt(n));
   }
   cols=Math.max(1, Math.min(cols, n));
-  const base=Math.floor(n/cols), extra=n%cols;
+  const lines = trad ? cols : Math.ceil(n/cols);
+  const base=Math.floor(n/lines), extra=n%lines;
   const counts=[];
-  for(let c=0;c<cols;c++) counts.push(base+(c<extra?1:0));
-  return {cols, counts};
+  for(let i=0;i<lines;i++) counts.push(base+(i<extra?1:0));
+  const longest=Math.max(...counts);
+  return trad ? {cols, rows:longest, counts, trad:true} : {cols:longest, rows:lines, counts, trad:false};
 }
 /* 가로:세로 비율이 A 인 직사각형을 초타원 안에 최대로 넣었을 때의 세로 반크기 */
 function inscribedHalfHeight(A, rx, ry, n){
@@ -210,16 +217,16 @@ function glyphSamples(f, ch, box){
    안쪽 윤곽을 넘는 획도 자르지 않고 테두리와 자연스럽게 겹쳐 그린다. */
 const OVERLAP_FRAC = 0.04;    // 안쪽 윤곽과 겹칠 수 있는 잉크 비율
 const OVERLAP_DEPTH = 0.10;   // 획이 윤곽 밖으로 나가도 되는 최대 깊이 (글자 크기 대비)
-function fitBlockHalfHeight(f, all, boxes, grid, trad, riX, riY, nExp, fill, spacing, stretch){
-  const rowsMax=Math.max(...grid.counts), cols=grid.cols;
-  const A=cols/rowsMax;
+function fitBlockHalfHeight(f, all, boxes, grid, riX, riY, nExp, fill, spacing, stretch){
+  const {cols, rows}=grid;
+  const A=cols/rows;
   const base=inscribedHalfHeight(A, riX, riY, nExp);
   const samples=all.map((ch,i)=>glyphSamples(f, ch, boxes[i]));
   if(samples.some(s=>!s.length)) return base;            // 측정 실패 — 내접 사각형으로
   const fits = halfH => {
     const boxH=2*halfH, boxW=boxH*A;
-    const cells=buildCells(grid, trad, boxW, boxH);
-    const gap=Math.min(boxW/cols, boxH/rowsMax)*spacing/100;
+    const cells=buildCells(grid, boxW, boxH);
+    const gap=Math.min(boxW/cols, boxH/rows)*spacing/100;
     const sc=glyphScales(boxes, cells, gap, fill, stretch);
     for(let i=0;i<all.length;i++){
       const {cx,cy}=cells[i], {sx,sy}=sc[i], s=samples[i];
@@ -240,21 +247,26 @@ function fitBlockHalfHeight(f, all, boxes, grid, trad, riX, riY, nExp, fill, spa
   for(let i=0;i<28;i++){ const mid=(lo+hi)/2; if(fits(mid)) lo=mid; else hi=mid; }
   return lo;
 }
-/* 글자를 채울 순서대로 칸(중심좌표+크기) 목록을 만든다 */
-function buildCells(grid, trad, boxW, boxH){
-  const {cols, counts}=grid;
-  const cw=boxW/cols;
-  // 칸 높이는 가장 긴 열을 기준으로 통일하고, 짧은 열은 위아래 가운데로 모은다.
-  // (열마다 높이를 다르게 하면 글자 크기가 들쭉날쭉해진다)
-  const ch=boxH/Math.max(...counts);
+/* 글자를 채울 순서대로 칸(중심좌표+크기) 목록을 만든다.
+   칸 크기는 가장 긴 줄을 기준으로 통일하고, 짧은 줄은 가운데로 모은다.
+   (줄마다 칸 크기를 다르게 하면 글자 크기가 들쭉날쭉해진다) */
+function buildCells(grid, boxW, boxH){
+  const {cols, rows, counts}=grid;
+  const cw=boxW/cols, ch=boxH/rows;
   const cells=[];
-  for(let c=0;c<cols;c++){
-    const colPos = trad ? (cols-1-c) : c;
-    const cx = -boxW/2 + cw*(colPos+0.5);
-    const rows=counts[c];
-    const colH=ch*rows;
-    for(let r=0;r<rows;r++){
-      cells.push({ cx, cy:-colH/2 + ch*(r+0.5), w:cw, h:ch });
+  if(grid.trad){
+    // 세로쓰기: 오른쪽 열부터, 열 안에서는 위→아래
+    for(let c=0;c<counts.length;c++){
+      const cx = -boxW/2 + cw*(cols-1-c+0.5);
+      const colH=ch*counts[c];
+      for(let r=0;r<counts[c];r++) cells.push({ cx, cy:-colH/2 + ch*(r+0.5), w:cw, h:ch });
+    }
+  }else{
+    // Z자 순: 위 행부터, 행 안에서는 왼쪽→오른쪽
+    for(let r=0;r<counts.length;r++){
+      const cy = -boxH/2 + ch*(r+0.5);
+      const rowW=cw*counts[r];
+      for(let c=0;c<counts[r];c++) cells.push({ cx:-rowW/2 + cw*(c+0.5), cy, w:cw, h:ch });
     }
   }
   return cells;
@@ -357,15 +369,14 @@ function render(ctx, size, st){
     const boxes=all.map(ch=>glyphBox(ctx.measureText(ch)));
 
     // 칸이 정사각형에 가까워지도록 글자판 비율을 정하고, 실제 획 모양이 허용하는 만큼 테두리 가까이 키운다
-    const grid = layoutCells(n, st.layout);
-    const rowsMax = Math.max(...grid.counts);
-    const A = grid.cols/rowsMax;
+    const grid = layoutCells(n, st.layout, st.trad);
+    const A = grid.cols/grid.rows;
     const fill = st.glyphFill/100;
-    const halfH = fitBlockHalfHeight(f, all, boxes, grid, st.trad, riX, riY, nExp, fill, st.spacing || 0, st.stretch);
+    const halfH = fitBlockHalfHeight(f, all, boxes, grid, riX, riY, nExp, fill, st.spacing || 0, st.stretch);
     const boxH = 2*halfH;
     const boxW = boxH*A;
-    const cells = buildCells(grid, st.trad, boxW, boxH);
-    const gap=Math.min(boxW/grid.cols, boxH/rowsMax)*(st.spacing || 0)/100;
+    const cells = buildCells(grid, boxW, boxH);
+    const gap=Math.min(boxW/grid.cols, boxH/grid.rows)*(st.spacing || 0)/100;
     const scales=glyphScales(boxes, cells, gap, fill, st.stretch);
 
     // 테두리와 겹치더라도 글자의 획 전체를 그린다.
@@ -442,9 +453,10 @@ function applyInk(ctx, size, st){
 }
 
 
+/* trad: 전통 세로쓰기(오른쪽 열부터 위→아래). 기본은 읽는 순서대로 왼쪽 위부터 Z자(→, ↓)로 놓는다. */
 export const PERSONAL_STAMP_DEFAULTS = Object.freeze({
   suffix: '인', fontIdx: 0, shape: 'circle', style: 'yang', layout: 'auto',
-  trad: true, stretch: true, glyphFill: 96, spacing: 0, doubleBorder: false,
+  trad: false, stretch: true, glyphFill: 96, spacing: 0, doubleBorder: false,
   color: '#b3272d', border: 52, pad: 40, rot: 0,
   ink: 16, grain: 62, rough: 14, seed: 20260730,
 });
