@@ -65,6 +65,18 @@ pnpm test     # Node.js 22.18+ 또는 24+: 실제 HWP 편집·저장·재열기 
 
 입력 위젯 타입은 `src/field-config.ts` 에서 라벨별로 조정할 수 있습니다.
 
+### 기관별 양식 (태백교육지원청)
+
+소속에 `태백교육지원청` 또는 `태백교육청` 이 들어 있으면 `public/templates/business-trip-taebaek.hwp` 를 씁니다
+(`src/template-kind.ts`). 이 양식에는 `출장명` 칸이 더 있고, 식비 줄 대신 친지 숙박내역 줄이 있습니다.
+
+원본 서식(`templates-src/business-trip-taebaek.hwpx`)에는 누름틀이 없어, 아래 스크립트가 같은 라벨의 누름틀을 넣어
+HWP 로 변환합니다. 서식이 바뀌면 원본을 교체한 뒤 다시 실행하세요.
+
+```bash
+node scripts/build-taebaek-template.mjs
+```
+
 ## 구조
 
 ```

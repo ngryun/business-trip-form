@@ -1,7 +1,8 @@
 import { setupFormTabs } from './form-tabs';
 import { applyExpenseFields, clearFareRows, FARE_FIELD_SUFFIXES } from './expense-fields';
 import { getCellRegions, invalidateCellRegions } from './cell-fields';
-import { loadTemplate } from './template-loader';
+import { fetchTemplateBytes, loadTemplate } from './template-loader';
+import { TEMPLATE_FILES, templateKindFor, type TemplateKind } from './template-kind';
 import { discoverFields, fillDateTimeRange, removeDateTimeRangeSeparator, setFieldValues, setSuppressedFareGuideLabels, type FieldMap } from './field-filler';
 import { downloadHwp } from './download';
 import { mountPreview, refreshPreview, reloadPreservingScroll, setPreviewReloadHook } from './preview';
@@ -48,7 +49,7 @@ import {
  */
 
 // GitHub Pages 등 하위 경로 배포 대응 — BASE_URL 기준 상대 경로
-const TEMPLATE_URL = `${import.meta.env.BASE_URL}templates/business-trip.hwp`;
+const templateUrl = (kind: TemplateKind): string => `${import.meta.env.BASE_URL}${TEMPLATE_FILES[kind]}`;
 const FORM_STORAGE_KEY = 'business-trip-form:form-values:v1';
 const APPLICANT_STORAGE_KEY = 'business-trip-form:applicant-info:v1';
 const SIGNATURE_STORAGE_KEY = 'business-trip-form:signature-stamp:v1';
@@ -150,6 +151,20 @@ function setStatus(message: string, isError = false): void {
   );
 }
 
+/** 지금 소속에 맞는 양식 (태백교육지원청이면 태백 양식) */
+function currentTemplateKind(): TemplateKind {
+  const org = formEl.elements.namedItem('소속');
+  return templateKindFor(org instanceof HTMLInputElement ? org.value : '');
+}
+
+/** 한 양식에만 있는 입력(예: 태백 양식의 출장명)은 그 양식일 때만 보인다. */
+function syncTemplateOnlyInputs(): void {
+  const kind = currentTemplateKind();
+  formEl.querySelectorAll<HTMLElement>('[data-template-only]').forEach((el) => {
+    el.hidden = el.dataset.templateOnly !== kind;
+  });
+}
+
 function collectFormValues(): Record<string, string> {
   syncAllDateTimeControlsToHidden();
   const data = new FormData(formEl);
@@ -173,6 +188,8 @@ function collectFormValues(): Record<string, string> {
     // 시작·종료를 한 누름틀(시작일시)에 합쳐 넣는다 — 종료일시 누름틀은 fillDateTimeRange 가 비운다
     시작일시: formatDateTimeRange(startDateTime, endDateTime),
     출장지: raw.출장지 ?? '',
+    // 출장명 칸은 태백 양식에만 있다 — 기본 양식에 넘기면 "양식에 없는 라벨" 경고가 뜬다.
+    ...(templateKindFor(raw.소속 ?? '') === 'taebaek' ? { 출장명: raw.출장명 ?? '' } : {}),
     갈때일자: formatDateKR(raw.갈때일자 ?? ''),
     갈때교통편: raw.갈때교통편 ?? '',
     갈때출발지: raw.갈때출발지 ?? '',
@@ -1114,6 +1131,8 @@ async function initialize(): Promise<void> {
   setupDateTimeControls();
   setupReturnLocationDefaults();
   setupPlaceCityLookup();
+  syncTemplateOnlyInputs();
+  formEl.addEventListener('input', syncTemplateOnlyInputs);
   setupAttachmentPresets();
   setupPassengerOrgShortcuts();
   setupPresetChips();
@@ -1133,11 +1152,18 @@ async function initialize(): Promise<void> {
   }
   await preloadFonts();
 
-  // 1) HWP 양식 fetch + 로드
-  const { wasm, docInfo, templateBytes } = await loadTemplate(TEMPLATE_URL);
+  // 1) HWP 양식 fetch + 로드 — 소속에 따라 바꿔 끼울 수 있게 두 양식을 모두 받아 두고, 지금 소속의 양식을 연다.
+  const { wasm, docInfo, templateBytes: defaultTemplateBytes } = await loadTemplate(templateUrl('default'));
+  const templateBytesByKind: Record<TemplateKind, Uint8Array> = {
+    default: defaultTemplateBytes,
+    taebaek: await fetchTemplateBytes(templateUrl('taebaek')),
+  };
+  const taebaekDocInfo = wasm.loadDocument(templateBytesByKind.taebaek, 'business-trip-taebaek.hwp');
+  let templateKind = currentTemplateKind();
+  if (templateKind === 'default') wasm.loadDocument(defaultTemplateBytes);
 
   // 1.5) 문서가 실제로 쓰는 폰트들을 적극 프리로드한 뒤 레이아웃 폭 측정값을 갱신
-  await preloadFonts(docInfo.fontsUsed ?? []);
+  await preloadFonts([...(docInfo.fontsUsed ?? []), ...(taebaekDocInfo.fontsUsed ?? [])]);
   wasm.refreshLayout();
 
   setStatus(`양식 로드 완료 (${docInfo.pageCount}쪽). 폼에서 입력하거나 미리보기에서 누름틀을 클릭하세요.`);
@@ -1182,7 +1208,7 @@ async function initialize(): Promise<void> {
     const storedStamp = signatureStamp.getStoredStamp();
     const hadStamp = signatureStamp.hasStamp();
     signatureStamp.forgetDocumentState();
-    wasm.loadDocument(templateBytes);
+    wasm.loadDocument(templateBytesByKind[templateKind]);
     // 운임 "행 삭제"는 표의 행을 지우지 않고 그 행의 내용(값·안내문구)만 비운다.
     const rawValues = collectRawFormValues();
     setSuppressedFareGuideLabels(
@@ -1211,9 +1237,15 @@ async function initialize(): Promise<void> {
     const { 시작일시: rangeText, ...values } = collectFormValues();
     const rawValues = collectRawFormValues();
     const fareState = ['갈때', '올때'].map((direction) => rawValues[`${direction}운임삭제`] === '1' ? '1' : '0').join(',');
-    if (fareState !== appliedFareState || (options.clearEmpty && !rangeText && hasFilledRangeField())) {
+    const nextTemplateKind = currentTemplateKind();
+    const templateChanged = nextTemplateKind !== templateKind;
+    templateKind = nextTemplateKind;
+    if (templateChanged || fareState !== appliedFareState || (options.clearEmpty && !rangeText && hasFilledRangeField())) {
       reloadPristineTemplate();
       appliedFareState = fareState;
+    }
+    if (templateChanged && !statusMessage) {
+      setStatus(templateKind === 'taebaek' ? '태백교육지원청 양식으로 바꿨습니다.' : '기본 양식으로 바꿨습니다.');
     }
     applyExpenseFields(wasm, rawValues);
     const { applied, missing } = setFieldValues(wasm, fields, values, {
@@ -1696,7 +1728,7 @@ async function initialize(): Promise<void> {
   function pushRecentValuesFromForm(): void {
     const labels = [
       '소속', '직급', '성명',
-      '출장지',
+      '출장명', '출장지',
       '갈때출발지', '갈때도착지', '올때출발지', '올때도착지',
       '첨부서류',
     ];

@@ -11,7 +11,17 @@ import type { DocumentInfo } from '@/core/types';
 export async function loadTemplate(url: string): Promise<{ wasm: WasmBridge; docInfo: DocumentInfo; templateBytes: Uint8Array }> {
   const wasm = new WasmBridge();
   await wasm.initialize();
+  const bytes = await fetchTemplateBytes(url);
+  const fileName = url.split('/').pop() ?? 'template.hwp';
+  const docInfo = wasm.loadDocument(bytes, fileName);
 
+  // 원본 바이트를 함께 반환 — 값이 있는 범위 누름틀을 비울 때 엔진 panic 을 피하려고
+  // 문서를 원본 상태로 다시 로드하는 우회 경로(main.ts)에서 사용한다.
+  return { wasm, docInfo, templateBytes: bytes };
+}
+
+/** 양식 파일 바이트만 받아 온다 — 소속에 따라 바꿔 끼울 다른 양식을 미리 받아 둘 때 쓴다. */
+export async function fetchTemplateBytes(url: string): Promise<Uint8Array> {
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`양식 파일 fetch 실패: ${res.status} ${res.statusText} (${url})`);
@@ -23,14 +33,8 @@ export async function loadTemplate(url: string): Promise<{ wasm: WasmBridge; doc
   if (bytes.length >= 4 && bytes[0] === 0x3c && bytes[1] === 0x21) {
     throw new Error(
       `양식 파일이 없습니다: ${url}\n` +
-      `apps/web-form/public/templates/business-trip.hwp 에 출장신청서 HWP 를 두세요.`,
+      `public/templates/ 에 출장신청서 HWP 를 두세요.`,
     );
   }
-
-  const fileName = url.split('/').pop() ?? 'template.hwp';
-  const docInfo = wasm.loadDocument(bytes, fileName);
-
-  // 원본 바이트를 함께 반환 — 값이 있는 범위 누름틀을 비울 때 엔진 panic 을 피하려고
-  // 문서를 원본 상태로 다시 로드하는 우회 경로(main.ts)에서 사용한다.
-  return { wasm, docInfo, templateBytes: bytes };
+  return bytes;
 }

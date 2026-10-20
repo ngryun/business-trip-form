@@ -23,10 +23,11 @@ export function applyExpenseFields(wasm: WasmBridge, values: Record<string, stri
     if (length) wasm.deleteTextInCell(sec, para, ctrl, cell.index, 0, 0, length);
     if (value) wasm.insertTextInCell(sec, para, ctrl, cell.index, 0, 0, value);
   };
+  // 식비 줄은 양식에 따라 없다 (태백교육지원청 양식은 그 자리에 친지 숙박내역 줄이 있다).
   const meal = cells.find((cell) => cell.text === '식비');
   const passengers = cells.find((cell) => cell.text === '동승자');
-  if (!meal || !passengers) throw new Error('식비 또는 동승자 항목을 찾지 못했습니다.');
-  write(meal.row, 2, values.식비지급받은금액 ?? '');
+  if (!passengers) throw new Error('동승자 항목을 찾지 못했습니다.');
+  if (meal) write(meal.row, 2, values.식비지급받은금액 ?? '');
   write(passengers.row, 2, values.총동승자수 ?? '');
   for (let i = 1; i <= 4; i++) {
     write(passengers.row + i, 6, values[`동승자${i}소속`] ?? '');

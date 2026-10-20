@@ -29,7 +29,7 @@ import { getRecentValues, pushRecentValue } from './recent-values';
 /** 라벨별로 "최근 입력" 자동완성을 노출할 가치가 있는 항목만 추적한다 (반복 입력이 잦은 텍스트류). */
 const RECENT_TRACKED_LABELS = new Set([
   '소속', '직급', '성명', '이름',
-  '출장지',
+  '출장명', '출장지',
   '갈때출발지', '갈때도착지', '올때출발지', '올때도착지',
   '첨부서류',
 ]);

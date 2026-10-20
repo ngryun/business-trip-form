@@ -27,6 +27,8 @@ export const FIELD_CONFIGS: Record<string, WidgetConfig> = {
   이름: { type: 'text' },
   시작일시: { type: 'datetime' },
   종료일시: { type: 'datetime' },
+  // 태백교육지원청 양식에만 있는 칸
+  출장명: { type: 'text' },
   출장지: { type: 'text' },
   갈때일자: { type: 'date' },
   갈때교통편: { type: 'select', options: TRANSPORT_OPTIONS },
