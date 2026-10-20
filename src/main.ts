@@ -3,6 +3,7 @@ import { applyExpenseFields, clearFareRows, FARE_FIELD_SUFFIXES } from './expens
 import { getCellRegions, invalidateCellRegions } from './cell-fields';
 import { fetchTemplateBytes, loadTemplate } from './template-loader';
 import { TEMPLATE_FILES, templateKindFor, type TemplateKind } from './template-kind';
+import { applyTripNameLine } from './trip-name';
 import { discoverFields, fillDateTimeRange, removeDateTimeRangeSeparator, setFieldValues, setSuppressedFareGuideLabels, type FieldMap } from './field-filler';
 import { downloadHwp } from './download';
 import { mountPreview, refreshPreview, reloadPreservingScroll, setPreviewReloadHook } from './preview';
@@ -180,6 +181,7 @@ function collectFormValues(): Record<string, string> {
   }
   const startDateTime = raw.시작일시 ?? '';
   const endDateTime = raw.종료일시 ?? '';
+  const kind = templateKindFor(raw.소속 ?? '');
   return {
     소속: raw.소속 ?? '',
     직급: raw.직급 ?? '',
@@ -188,8 +190,8 @@ function collectFormValues(): Record<string, string> {
     // 시작·종료를 한 누름틀(시작일시)에 합쳐 넣는다 — 종료일시 누름틀은 fillDateTimeRange 가 비운다
     시작일시: formatDateTimeRange(startDateTime, endDateTime),
     출장지: raw.출장지 ?? '',
-    // 출장명 칸은 태백 양식에만 있다 — 기본 양식에 넘기면 "양식에 없는 라벨" 경고가 뜬다.
-    ...(templateKindFor(raw.소속 ?? '') === 'taebaek' ? { 출장명: raw.출장명 ?? '' } : {}),
+    // 출장명 누름틀은 태백 양식에만 있다. 기본 양식은 applyTripNameLine 이 출장지 셀 아래 줄에 넣는다.
+    ...(kind === 'taebaek' ? { 출장명: raw.출장명 ?? '' } : {}),
     갈때일자: formatDateKR(raw.갈때일자 ?? ''),
     갈때교통편: raw.갈때교통편 ?? '',
     갈때출발지: raw.갈때출발지 ?? '',
@@ -1251,6 +1253,8 @@ async function initialize(): Promise<void> {
     const { applied, missing } = setFieldValues(wasm, fields, values, {
       clearEmpty: options.clearEmpty,
     });
+    // 기본 양식: 출장지 셀 아래 줄에 [출장명 : …] 을 넣는다 (태백 양식은 출장명 누름틀을 쓰므로 줄을 비운다).
+    applyTripNameLine(wasm, fields.get('출장지')?.[0]?.fieldId, templateKind === 'default' ? rawValues.출장명 ?? '' : '');
     fillDateTimeRange(wasm, fields, rangeText, { clearEmpty: options.clearEmpty });
     refreshPreviewAndRealignSignatureStamp();
     fields = discoverFields(wasm);
