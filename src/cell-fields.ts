@@ -1,7 +1,7 @@
 /**
  * 누름틀이 아닌 "일반 표 칸"을 미리보기에서 직접 클릭해 편집하기 위한 좌표 계산.
  *
- * 식비 지급받은 금액 · 총 동승자수 · 동승자 명단(소속/성명) · 운임 등급 은 양식에 누름틀이 없어
+ * 식비 지급받은 금액 · 총 동승자수 · 동승자 명단(소속/성명) · 운임 등급·금액 은 양식에 누름틀이 없어
  * field-interaction 의 누름틀 hit-test 로는 잡히지 않는다. 여기서 표의 셀 bbox 를 구해
  * 클릭 가능한 영역 목록을 만들어 준다. 운임 행 삭제/복원은 "운 임" 제목 칸을 눌러 연다.
  *
@@ -133,12 +133,16 @@ export function computeCellRegions(wasm: WasmBridge): CellRegion[] {
   if (fareCell) {
     regions.push({ kind: 'fare', key: 'fare', label: '운임 행', rect: toRect(fareCell) });
   }
-  // 운임표 「등 급」 열 — 갈 때·올 때 행이 폼의 등급 하나를 함께 쓴다.
-  const gradeCol = fareRow !== null ? colOfHeader(fareRow, '등급') : null;
-  if (fareRow !== null && gradeCol !== null) {
+  // 운임표 「등 급」 열은 갈 때·올 때 행이 폼의 등급 하나를 함께 쓰고, 「금 액」 열은 방향별로 따로 쓴다.
+  if (fareRow !== null) {
+    const gradeCol = colOfHeader(fareRow, '등급');
+    const amountCol = colOfHeader(fareRow, '금액');
     (['갈때', '올때'] as const).forEach((direction, offset) => {
       const row = rowOfField(`${direction}일자`) ?? fareRow + 1 + offset;
-      addText(cellAt(row, gradeCol), '등급', '등급 (갈 때·올 때 공통)', '예: 제2호', direction);
+      if (gradeCol !== null) addText(cellAt(row, gradeCol), '등급', '등급 (갈 때·올 때 공통)', '예: 제2호', direction);
+      if (amountCol !== null) {
+        addText(cellAt(row, amountCol), `${direction}금액`, `${direction === '갈때' ? '갈 때' : '올 때'} 운임 금액`, '예: 12,300', direction);
+      }
     });
   }
 
