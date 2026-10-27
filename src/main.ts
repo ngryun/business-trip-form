@@ -4,7 +4,9 @@ import { getCellRegions, invalidateCellRegions } from './cell-fields';
 import { fetchTemplateBytes, loadTemplate } from './template-loader';
 import { TEMPLATE_FILES, templateKindFor, type TemplateKind } from './template-kind';
 import { applyTripNameLine } from './trip-name';
-import { BUS_FARE_TABLE_DATE, busFareLabel, findBusFares, formatWon } from './bus-fares';
+import { BUS_FARE_TABLE_DATE, busFareLabel, findBusFares, findOfficialFares, formatWon, type OfficialFare, type OfficialFareData } from './bus-fares';
+import tagoFaresJson from './data/tago-fares.json';
+const OFFICIAL_FARES = tagoFaresJson as OfficialFareData;
 import { discoverFields, fillDateTimeRange, removeDateTimeRangeSeparator, setFieldValues, setSuppressedFareGuideLabels, type FieldMap } from './field-filler';
 import { downloadHwp } from './download';
 import { mountPreview, refreshPreview, reloadPreservingScroll, setPreviewReloadHook } from './preview';
@@ -880,15 +882,35 @@ function setupBusFareSuggestions(): void {
       const from = (formEl.elements.namedItem(`${direction}출발지`) as HTMLInputElement | null)?.value ?? '';
       const to = (formEl.elements.namedItem(`${direction}도착지`) as HTMLInputElement | null)?.value ?? '';
       const fares = findBusFares(from, to);
+      const official = findOfficialFares(from, to, OFFICIAL_FARES);
       const previousAuto = autoBusFares.get(amount.name);
       const untouched = !amount.value.trim() || amount.value === previousAuto;
       wrap.replaceChildren();
+      const officialChip = (fare: OfficialFare, differs: boolean): HTMLButtonElement => {
+        const value = formatWon(fare.요금);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = differs ? 'attachment-preset-chip attachment-preset-chip--warn' : 'attachment-preset-chip';
+        btn.dataset.amount = value;
+        btn.textContent = `공식 운임 ${fare.등급} ${value}${differs ? ' · 요금표와 다름' : ''}`;
+        btn.title = `국토교통부 시외버스정보(TAGO) ${OFFICIAL_FARES.조회일} 조회 · ${fare.출발}→${fare.도착} ${fare.등급} ${value}원${differs ? '. 교육지원청 요금표와 금액이 다르니 어느 쪽을 쓸지 확인하세요.' : ''}`;
+        btn.setAttribute('aria-pressed', 'false');
+        btn.addEventListener('click', () => { setAmount(amount, value); markPressed(wrap, amount); });
+        return btn;
+      };
       if (fares.length === 0) {
-        // 구간이 표에서 벗어나면 자동으로 채웠던 금액만 비운다.
-        if (previousAuto !== undefined && amount.value === previousAuto) setAmount(amount, '');
-        autoBusFares.delete(amount.name);
-        wrap.hidden = true;
-        renderNaverLink(wrap, from, to);
+        // 요금표에 없는 구간: 공식 운임이 있으면 그것을 제안하고, 없으면 자동으로 채웠던 금액만 비운다.
+        if (official.length > 0) {
+          wrap.hidden = false;
+          official.forEach((fare) => wrap.appendChild(officialChip(fare, false)));
+          if (untouched) setAmount(amount, formatWon(official[0].요금));
+          markPressed(wrap, amount);
+        } else {
+          if (previousAuto !== undefined && amount.value === previousAuto) setAmount(amount, '');
+          autoBusFares.delete(amount.name);
+          wrap.hidden = true;
+        }
+        renderNaverLink(wrap, from, to, official.length > 0);
         continue;
       }
       wrap.hidden = false;
@@ -904,13 +926,16 @@ function setupBusFareSuggestions(): void {
         btn.addEventListener('click', () => { setAmount(amount, value); markPressed(wrap, amount); });
         wrap.appendChild(btn);
       });
+      // 공식 운임이 요금표와 다르면 경고 칩으로 함께 보여 준다 (요금표가 오래됐을 수 있으므로 비교용).
+      const representative = official[0];
+      if (representative && representative.요금 !== fares[0].요금) wrap.appendChild(officialChip(representative, true));
       if (untouched) setAmount(amount, formatWon(fares[0].요금));
       markPressed(wrap, amount);
     }
   };
   /** 요금표에 없는 구간: 출발·도착 터미널 좌표를 찾아 네이버지도 대중교통 길찾기 링크를 보여준다. */
   const linkTokens = new Map<HTMLElement, number>();
-  const renderNaverLink = (wrap: HTMLElement, from: string, to: string): void => {
+  const renderNaverLink = (wrap: HTMLElement, from: string, to: string, short = false): void => {
     const token = (linkTokens.get(wrap) ?? 0) + 1;
     linkTokens.set(wrap, token);
     if (!isPlaceLookupEnabled() || !from.trim() || !to.trim() || from.trim() === to.trim()) return;
@@ -921,9 +946,10 @@ function setupBusFareSuggestions(): void {
       link.href = naverTransitUrl(start, goal);
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
-      link.textContent = '네이버지도에서 시외버스 요금 확인 ↗';
+      link.textContent = short ? '네이버지도에서 확인 ↗' : '네이버지도에서 시외버스 요금 확인 ↗';
       link.title = `${start.name} → ${goal.name} 대중교통 길찾기. 시외버스 최소요금을 확인해 금액에 입력하세요.`;
-      wrap.replaceChildren(link);
+      wrap.querySelectorAll('a').forEach((old) => old.remove());
+      wrap.appendChild(link);
       wrap.hidden = false;
     }).catch((err) => console.error(err));
   };

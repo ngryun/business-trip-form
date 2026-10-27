@@ -289,6 +289,11 @@ html, body {
   border-color: #93c5fd;
   outline: none;
 }
+.attachment-preset-chip--warn {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+}
 .attachment-preset-chip--link {
   text-decoration: none;
   display: inline-block;

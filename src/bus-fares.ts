@@ -102,3 +102,59 @@ export function formatWon(amount: number): string {
 export function busFareLabel(fare: BusFare): string {
   return `${fare.출발}→${fare.행선지} ${formatWon(fare.요금)}`;
 }
+
+/* ── 공식 운임 (국토교통부 TAGO 시외버스정보 API, src/data/tago-fares.json) ──
+ * 교육지원청 기준표가 우선이고 이 값은 비교·참고용이다. 기준표와 다르면 둘 다 보여 주고,
+ * 기준표에 없는 구간이면 공식 운임을 제안한다. 갱신: node scripts/fetch-tago-fares.mjs */
+
+export interface OfficialFare {
+  /** 출발 터미널명 (간성·속초) */
+  출발: string;
+  /** 도착 터미널명 (API 표기: 춘천, 동서울, 강릉 …) */
+  도착: string;
+  도착시도?: string;
+  등급: string;
+  요금: number;
+}
+
+export interface OfficialFareData {
+  조회일: string;
+  구간: OfficialFare[];
+}
+
+/** 출발지·도착지 도시명 → API 터미널명. 표와 같은 기준: 고성=간성, 서울=동서울. */
+const CITY_TO_TERMINALS: Record<string, string[]> = {
+  고성: ['간성'],
+  서울: ['동서울'],
+  부산: ['부산동부', '부산종합'],
+  대구: ['대구북부', '대구동부'],
+  인천: ['인천공항2터미널', '인천공항1터미널', '인천'],
+  대전: ['대전복합', '대전'],
+  양양: ['양양', '하조대'],
+  평창: ['평창', '횡계'],
+  인제: ['인제', '신남'],
+};
+
+const GRADE_ORDER = ['일반', '우등', '프리미엄'];
+const gradeRank = (grade: string): number => {
+  const i = GRADE_ORDER.findIndex((g) => grade.startsWith(g));
+  return i < 0 ? GRADE_ORDER.length : i;
+};
+
+/**
+ * 출발지→도착지의 공식 운임 후보. 자료는 간성·속초 출발만 있으므로 반대 방향은 같은 요금으로 본다.
+ * 일반 → 우등 → 프리미엄 순, 같은 등급이면 싼 것부터. 심야·주말 등급은 제외한다.
+ */
+export function findOfficialFares(from: string, to: string, source: OfficialFareData): OfficialFare[] {
+  const a = normalizeFareCity(from);
+  const b = normalizeFareCity(to);
+  if (!a || !b || a === b) return [];
+  const match = (dep: string, arr: string): OfficialFare[] => {
+    const deps = CITY_TO_TERMINALS[dep] ?? [dep];
+    const arrs = CITY_TO_TERMINALS[arr] ?? [arr];
+    return source.구간.filter((f) => deps.includes(f.출발) && arrs.includes(f.도착) && !/심야|주말/.test(f.등급));
+  };
+  const forward = match(a, b);
+  const found = forward.length ? forward : match(b, a);
+  return [...found].sort((x, y) => gradeRank(x.등급) - gradeRank(y.등급) || x.요금 - y.요금);
+}
