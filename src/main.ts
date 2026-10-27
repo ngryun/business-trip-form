@@ -4,7 +4,9 @@ import { getCellRegions, invalidateCellRegions } from './cell-fields';
 import { fetchTemplateBytes, loadTemplate } from './template-loader';
 import { TEMPLATE_FILES, templateKindFor, type TemplateKind } from './template-kind';
 import { applyTripNameLine } from './trip-name';
-import { BUS_FARE_TABLE_DATE, busFareLabel, findBusFares, findOfficialFares, formatWon, type OfficialFare, type OfficialFareData } from './bus-fares';
+import { BUS_FARE_TABLE_DATE, busFareLabel, findBusFares, findOfficialFares, formatWon, type BusFare, type OfficialFare, type OfficialFareData } from './bus-fares';
+import { alternativeRegions, regionLabel, resolveFareRoute, sameNameProvinces, sameRegion, type FareRegion, type ResolvedRegion } from './fare-region';
+import { fetchLiveFares, isLiveFareEnabled } from './tago-live';
 import tagoFaresJson from './data/tago-fares.json';
 const OFFICIAL_FARES = tagoFaresJson as OfficialFareData;
 import { discoverFields, fillDateTimeRange, removeDateTimeRangeSeparator, setFieldValues, setSuppressedFareGuideLabels, type FieldMap } from './field-filler';
@@ -106,6 +108,11 @@ const autoTravelDates = new Map<string, string>();
 const autoReturnLocations = new Map<string, string>();
 /** 지도 검색으로 채운 출발지·도착지 값 — 사용자가 직접 고친 값은 덮어쓰지 않으려고 기억한다. */
 const autoPlaceCities = new Map<string, string>();
+/** 지도 검색·바꾸기 칩으로 정한 출발지·도착지의 시도 (칸 이름 → 그때의 칸 값·지역). 칸 값이 같을 때만 쓴다. */
+const placeRegionHints = new Map<string, { value: string; region: FareRegion; 바꿈?: boolean }>();
+/** 올 때 칸은 갈 때 칸을 거꾸로 받아 오므로, 값이 같으면 그쪽에서 정한 시도를 따른다. */
+const RETURN_REGION_SOURCES: Record<string, string> = { 올때출발지: '갈때도착지', 올때도착지: '갈때출발지' };
+const LIVE_FARE_DELAY_MS = 600;
 /** 요금표로 자동으로 채운 운임 금액 (input name → 값). 사용자가 직접 고친 금액은 덮어쓰지 않기 위해 기억한다. */
 const autoBusFares = new Map<string, string>();
 let syncBusFares: (() => void) | null = null;
@@ -848,10 +855,30 @@ function setupDateTimeControls(): void {
   document.getElementById('datetime-range')?.appendChild(dateTimeRangeChrome.root);
 }
 
+/** 칸의 지도 검색·바꾸기 칩 시도 — 칸 값이 그때와 같을 때만. 올 때 칸은 짝이 되는 갈 때 칸의 것도 본다. */
+function regionHintFor(name: string, value: string): { region: FareRegion; 바꿈?: boolean } | null {
+  const text = value.trim();
+  for (const key of [name, RETURN_REGION_SOURCES[name]]) {
+    const hint = key ? placeRegionHints.get(key) : undefined;
+    if (hint && hint.value === text) return hint;
+  }
+  return null;
+}
+
+/** "경남 고성" → "경남 고성으로", "광주광역시" → "광주광역시로" (받침 없거나 ㄹ 받침이면 "로"). */
+function withEuro(word: string): string {
+  const code = word.charCodeAt(word.length - 1) - 0xac00;
+  if (code < 0 || code > 11171) return `${word}(으)로`;
+  const final = code % 28;
+  return `${word}${final === 0 || final === 8 ? '로' : '으로'}`;
+}
+
 /**
  * 출발지·도착지가 고성교육지원청 버스요금표(2026. 1. 13.)의 구간과 맞으면 금액을 자동으로 채우고,
  * 금액 칸 아래에 후보 칩(같은 도시의 다른 정류장 포함)을 보여준다.
+ * 표에 없는 구간은 TAGO 공식 운임(내장 자료, 이어서 실시간 조회)을 제안하고 네이버지도 길찾기 링크를 둔다.
  * 비어 있거나 전에 자동으로 채운 금액만 바꾸고, 사용자가 직접 쓴 금액은 그대로 둔다.
+ * 동명 지역(강원 고성·경남 고성, 광주광역시·경기 광주)은 시도를 정해 계산하고, 짐작해 정했으면 바꾸기 칩을 보여준다.
  */
 function setupBusFareSuggestions(): void {
   const wraps = [...formEl.querySelectorAll<HTMLElement>('[data-fare-suggestions]')];
@@ -860,6 +887,7 @@ function setupBusFareSuggestions(): void {
     const el = formEl.elements.namedItem(`${direction}금액`);
     return el instanceof HTMLInputElement ? el : null;
   };
+  const fieldValue = (name: string): string => (formEl.elements.namedItem(name) as HTMLInputElement | null)?.value ?? '';
   const setAmount = (amount: HTMLInputElement, value: string): void => {
     autoBusFares.set(amount.name, value);
     if (amount.value === value) return;
@@ -867,11 +895,49 @@ function setupBusFareSuggestions(): void {
     amount.dispatchEvent(new Event('input', { bubbles: true }));
     amount.dispatchEvent(new Event('change', { bubbles: true }));
   };
+  const isUntouched = (amount: HTMLInputElement): boolean =>
+    !amount.value.trim() || amount.value === autoBusFares.get(amount.name);
   const markPressed = (wrap: HTMLElement, amount: HTMLInputElement): void => {
-    wrap.querySelectorAll<HTMLButtonElement>('button').forEach((chip) => {
+    wrap.querySelectorAll<HTMLButtonElement>('button[data-amount]').forEach((chip) => {
       const active = chip.dataset.amount === amount.value.trim();
       chip.classList.toggle('is-active', active);
       chip.setAttribute('aria-pressed', String(active));
+    });
+  };
+  const officialChip = (wrap: HTMLElement, amount: HTMLInputElement, fare: OfficialFare, differs: boolean): HTMLButtonElement => {
+    const value = formatWon(fare.요금);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = differs ? 'attachment-preset-chip attachment-preset-chip--warn' : 'attachment-preset-chip';
+    btn.dataset.amount = value;
+    btn.dataset.official = '';
+    btn.textContent = `공식 운임 ${fare.등급} ${value}${differs ? ' · 요금표와 다름' : ''}`;
+    const source = fare.실시간
+      ? `국토교통부 시외버스정보(TAGO) 실시간 조회 · ${fare.조회일} 배차 기준`
+      : `국토교통부 시외버스정보(TAGO) ${fare.조회일 ?? OFFICIAL_FARES.조회일} 조회`;
+    btn.title = `${source} · ${fare.출발}→${fare.도착} ${fare.등급} ${value}원${differs ? '. 교육지원청 요금표와 금액이 다르니 어느 쪽을 쓸지 확인하세요.' : ''}`;
+    btn.setAttribute('aria-pressed', 'false');
+    btn.addEventListener('click', () => { setAmount(amount, value); markPressed(wrap, amount); });
+    return btn;
+  };
+  /**
+   * 동명 지역을 짐작해 정한 칸이면 "경남 고성으로 바꾸기" 칩 — 누르면 그 칸의 시도를 기억하고 다시 계산한다.
+   * 칩으로 바꾼 칸은 되돌릴 수 있게 계속 보여 준다 (지도 검색으로 정한 칸은 보여 주지 않는다).
+   */
+  const regionSwitchChips = (fieldName: string, label: string, region: ResolvedRegion | null, switched: boolean): HTMLButtonElement[] => {
+    if (!region || !(region.추정 || switched)) return [];
+    return alternativeRegions(region).map((alt) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'attachment-preset-chip attachment-preset-chip--region';
+      btn.dataset.regionSwitch = '';
+      btn.textContent = `${label} ${regionLabel(region)} 기준 · ${withEuro(regionLabel(alt))} 바꾸기`;
+      btn.title = `${label} "${region.시군}"은(는) 같은 이름의 지역이 있어 ${withEuro(regionLabel(region))} 보고 계산했습니다. ${regionLabel(alt)}이면 누르세요.`;
+      btn.addEventListener('click', () => {
+        placeRegionHints.set(fieldName, { value: fieldValue(fieldName).trim(), region: alt, 바꿈: true });
+        sync();
+      });
+      return btn;
     });
   };
   const sync = (): void => {
@@ -879,67 +945,62 @@ function setupBusFareSuggestions(): void {
       const direction = wrap.dataset.fareSuggestions ?? '';
       const amount = amountInput(direction);
       if (!amount) continue;
-      const from = (formEl.elements.namedItem(`${direction}출발지`) as HTMLInputElement | null)?.value ?? '';
-      const to = (formEl.elements.namedItem(`${direction}도착지`) as HTMLInputElement | null)?.value ?? '';
-      const fares = findBusFares(from, to);
-      const official = findOfficialFares(from, to, OFFICIAL_FARES);
+      const fromName = `${direction}출발지`;
+      const toName = `${direction}도착지`;
+      const from = fieldValue(fromName);
+      const to = fieldValue(toName);
+      const fromHint = regionHintFor(fromName, from);
+      const toHint = regionHintFor(toName, to);
+      const route = resolveFareRoute(from, to, { from: fromHint?.region, to: toHint?.region });
+      const fares = findBusFares(route.from, route.to);
+      const official = findOfficialFares(route.from, route.to, OFFICIAL_FARES);
       const previousAuto = autoBusFares.get(amount.name);
-      const untouched = !amount.value.trim() || amount.value === previousAuto;
+      const untouched = isUntouched(amount);
       wrap.replaceChildren();
-      const officialChip = (fare: OfficialFare, differs: boolean): HTMLButtonElement => {
-        const value = formatWon(fare.요금);
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = differs ? 'attachment-preset-chip attachment-preset-chip--warn' : 'attachment-preset-chip';
-        btn.dataset.amount = value;
-        btn.textContent = `공식 운임 ${fare.등급} ${value}${differs ? ' · 요금표와 다름' : ''}`;
-        btn.title = `국토교통부 시외버스정보(TAGO) ${OFFICIAL_FARES.조회일} 조회 · ${fare.출발}→${fare.도착} ${fare.등급} ${value}원${differs ? '. 교육지원청 요금표와 금액이 다르니 어느 쪽을 쓸지 확인하세요.' : ''}`;
-        btn.setAttribute('aria-pressed', 'false');
-        btn.addEventListener('click', () => { setAmount(amount, value); markPressed(wrap, amount); });
-        return btn;
-      };
       if (fares.length === 0) {
         // 요금표에 없는 구간: 공식 운임이 있으면 그것을 제안하고, 없으면 자동으로 채웠던 금액만 비운다.
         if (official.length > 0) {
-          wrap.hidden = false;
-          official.forEach((fare) => wrap.appendChild(officialChip(fare, false)));
+          official.forEach((fare) => wrap.appendChild(officialChip(wrap, amount, fare, false)));
           if (untouched) setAmount(amount, formatWon(official[0].요금));
-          markPressed(wrap, amount);
         } else {
           if (previousAuto !== undefined && amount.value === previousAuto) setAmount(amount, '');
           autoBusFares.delete(amount.name);
-          wrap.hidden = true;
         }
-        renderNaverLink(wrap, from, to, official.length > 0);
-        continue;
+      } else {
+        fares.forEach((fare, index) => {
+          const value = formatWon(fare.요금);
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'attachment-preset-chip';
+          btn.dataset.amount = value;
+          btn.textContent = index === 0 ? `요금표 ${busFareLabel(fare)}` : `${fare.행선지} ${value}`;
+          btn.title = `고성교육지원청 버스요금표 ${BUS_FARE_TABLE_DATE} 기준 · ${fare.출발}→${fare.행선지} ${value}원${fare.환승 ? ` (${fare.환승})` : ''}`;
+          btn.setAttribute('aria-pressed', 'false');
+          btn.addEventListener('click', () => { setAmount(amount, value); markPressed(wrap, amount); });
+          wrap.appendChild(btn);
+        });
+        // 공식 운임이 요금표와 다르면 경고 칩으로 함께 보여 준다 (요금표가 오래됐을 수 있으므로 비교용).
+        const representative = official[0];
+        if (representative && representative.요금 !== fares[0].요금) wrap.appendChild(officialChip(wrap, amount, representative, true));
+        if (untouched) setAmount(amount, formatWon(fares[0].요금));
       }
-      wrap.hidden = false;
-      fares.forEach((fare, index) => {
-        const value = formatWon(fare.요금);
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'attachment-preset-chip';
-        btn.dataset.amount = value;
-        btn.textContent = index === 0 ? `요금표 ${busFareLabel(fare)}` : `${fare.행선지} ${value}`;
-        btn.title = `고성교육지원청 버스요금표 ${BUS_FARE_TABLE_DATE} 기준 · ${fare.출발}→${fare.행선지} ${value}원${fare.환승 ? ` (${fare.환승})` : ''}`;
-        btn.setAttribute('aria-pressed', 'false');
-        btn.addEventListener('click', () => { setAmount(amount, value); markPressed(wrap, amount); });
-        wrap.appendChild(btn);
-      });
-      // 공식 운임이 요금표와 다르면 경고 칩으로 함께 보여 준다 (요금표가 오래됐을 수 있으므로 비교용).
-      const representative = official[0];
-      if (representative && representative.요금 !== fares[0].요금) wrap.appendChild(officialChip(representative, true));
-      if (untouched) setAmount(amount, formatWon(fares[0].요금));
+      [...regionSwitchChips(fromName, '출발지', route.from, fromHint?.바꿈 ?? false), ...regionSwitchChips(toName, '도착지', route.to, toHint?.바꿈 ?? false)]
+        .forEach((chip) => wrap.appendChild(chip));
+      wrap.hidden = wrap.childElementCount === 0;
       markPressed(wrap, amount);
+      if (fares.length === 0) renderNaverLink(wrap, route.from, route.to, official.length > 0);
+      renderLiveFares(wrap, amount, route, fares);
     }
   };
   /** 요금표에 없는 구간: 출발·도착 터미널 좌표를 찾아 네이버지도 대중교통 길찾기 링크를 보여준다. */
   const linkTokens = new Map<HTMLElement, number>();
-  const renderNaverLink = (wrap: HTMLElement, from: string, to: string, short = false): void => {
+  const renderNaverLink = (wrap: HTMLElement, from: FareRegion | null, to: FareRegion | null, short = false): void => {
     const token = (linkTokens.get(wrap) ?? 0) + 1;
     linkTokens.set(wrap, token);
-    if (!isPlaceLookupEnabled() || !from.trim() || !to.trim() || from.trim() === to.trim()) return;
-    void Promise.all([lookupTerminalPoint(from), lookupTerminalPoint(to)]).then(([start, goal]) => {
+    if (!isPlaceLookupEnabled() || !from || !to || sameRegion(from, to)) return;
+    // 동명 지역만 시도를 붙여 찾는다 ("경남 고성 시외버스터미널"). 광주광역시는 "광주" 만으로 찾힌다.
+    const province = (r: FareRegion): string => (sameNameProvinces(r.시군).length > 0 && r.시도 !== r.시군 ? r.시도 : '');
+    void Promise.all([lookupTerminalPoint(from.시군, province(from)), lookupTerminalPoint(to.시군, province(to))]).then(([start, goal]) => {
       if (linkTokens.get(wrap) !== token || !start || !goal) return;
       const link = document.createElement('a');
       link.className = 'attachment-preset-chip attachment-preset-chip--link';
@@ -952,6 +1013,40 @@ function setupBusFareSuggestions(): void {
       wrap.appendChild(link);
       wrap.hidden = false;
     }).catch((err) => console.error(err));
+  };
+  /**
+   * 실시간 공식 운임: 입력이 멈추면 TAGO 를 조회해 내장 자료의 공식 운임 칩을 오늘 배차 기준 값으로 바꾼다.
+   * 요금표 구간이면 금액이 다를 때만 경고 칩, 요금표에 없는 구간이면 금액도 자동으로 채운다. 실패하면 내장 자료를 그대로 둔다.
+   */
+  const liveTokens = new Map<HTMLElement, number>();
+  const liveTimers = new Map<HTMLElement, number>();
+  const renderLiveFares = (
+    wrap: HTMLElement,
+    amount: HTMLInputElement,
+    route: { from: FareRegion | null; to: FareRegion | null },
+    tableFares: BusFare[],
+  ): void => {
+    const token = (liveTokens.get(wrap) ?? 0) + 1;
+    liveTokens.set(wrap, token);
+    window.clearTimeout(liveTimers.get(wrap));
+    const { from, to } = route;
+    if (!isLiveFareEnabled() || !from || !to || sameRegion(from, to)) return;
+    liveTimers.set(wrap, window.setTimeout(() => {
+      fetchLiveFares(from, to).then((live) => {
+        if (liveTokens.get(wrap) !== token || live.length === 0) return;
+        wrap.querySelectorAll('[data-official]').forEach((chip) => chip.remove());
+        const before = wrap.querySelector('[data-region-switch], a');
+        const insert = (chip: HTMLElement): void => { wrap.insertBefore(chip, before); };
+        if (tableFares.length > 0) {
+          if (live[0].요금 !== tableFares[0].요금) insert(officialChip(wrap, amount, live[0], true));
+        } else {
+          live.forEach((fare) => insert(officialChip(wrap, amount, fare, false)));
+          if (isUntouched(amount)) setAmount(amount, formatWon(live[0].요금));
+        }
+        wrap.hidden = false;
+        markPressed(wrap, amount);
+      }).catch((err) => console.error(err));
+    }, LIVE_FARE_DELAY_MS));
   };
   for (const direction of ['갈때', '올때']) {
     for (const suffix of ['출발지', '도착지']) {
@@ -1023,11 +1118,26 @@ async function applyPlaceCity(sourceName: string): Promise<void> {
   }
   // 검색하는 동안 입력이 바뀌었거나 사용자가 직접 칸을 채웠으면 결과를 버린다.
   if (source.value.trim() !== query || found.length === 0 || target.disabled) return;
-  const previousAutoValue = autoPlaceCities.get(targetName);
-  if (target.value && target.value !== previousAutoValue) return;
-
   const city = joinCities(found.map((result) => result.city));
+  // 찾은 장소가 한 도시면 그 시도를 기억한다 — 칸에는 "고성" 만 들어가도 강원 고성·경남 고성을 가려 운임을 찾는다.
+  const regions = new Set(found.map((result) => `${result.시도} ${result.city}`));
+  const rememberRegion = (): void => {
+    if (regions.size === 1 && found[0].시도) placeRegionHints.set(targetName, { value: city, region: { 시도: found[0].시도, 시군: found[0].city } });
+    else placeRegionHints.delete(targetName);
+  };
+  const previousAutoValue = autoPlaceCities.get(targetName);
+  if (target.value && target.value !== previousAutoValue) {
+    // 직접 썼거나 URL·저장본으로 채워진 값이 찾은 도시와 같으면 시도만 기억한다.
+    if (target.value.trim() === city) {
+      rememberRegion();
+      syncBusFares?.();
+    }
+    return;
+  }
+
   autoPlaceCities.set(targetName, city);
+  rememberRegion();
+  syncBusFares?.();
   if (setFormFieldValue(targetName, city)) {
     const label = targetName.endsWith('출발지') ? '출발지' : '도착지';
     const places = found.map((result) => `${result.placeName} · ${result.address}`).join(' / ');

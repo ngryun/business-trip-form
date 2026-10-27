@@ -54,6 +54,19 @@ pnpm test     # Node.js 22.18+ 또는 24+: 실제 HWP 편집·저장·재열기 
 
 `dist/` 를 Cloudflare Pages · Vercel · Netlify · GitHub Pages 등 정적 호스팅에 올리면 됩니다.
 
+### 운임 자동 입력용 키
+
+| 변수 | 쓰임 | 없으면 |
+| --- | --- | --- |
+| `VITE_KAKAO_JS_KEY` | 소속·출장지 → 출발지·도착지 도시명(시도 포함) 찾기, 네이버지도 링크 | 지도 검색이 꺼짐 |
+| `VITE_TAGO_KEY` | 공공데이터포털 TAGO 시외버스정보 — 출발지→도착지 공식 운임 실시간 조회 | 내장 자료(`src/data/tago-fares.json`)만 씀 |
+
+로컬은 `.env.local`(저장소에 올리지 않음)에, GitHub Pages 배포는 저장소 Settings → Variables 의 `KAKAO_JS_KEY` · `TAGO_API_KEY` 에 넣습니다.
+TAGO 키는 번들에 들어가는 공개 키라서 누구나 볼 수 있습니다. 하루 호출 한도(개발계정 10,000회)가 공유되므로, 같은 날 같은 구간은 브라우저에 저장해 다시 부르지 않습니다.
+전국 터미널 목록(`src/data/tago-terminals.json`)은 `node scripts/fetch-tago-fares.mjs --terminals` 로 가끔 갱신합니다.
+
+같은 이름의 지역(강원 고성·경남 고성, 광주광역시·경기 광주)은 지도 검색 주소의 시도로 구분합니다. 칸에 직접 쓸 때는 「경남 고성」·「고성(경남)」처럼 시도를 붙이거나, 운임 칩 옆의 바꾸기 칩을 누릅니다.
+
 ## 양식 교체 방법
 
 `public/templates/business-trip.hwp` 를 원하는 HWP 양식으로 교체합니다.

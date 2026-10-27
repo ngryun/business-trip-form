@@ -24,11 +24,13 @@ const TERMINAL_ALIASES: Record<string, string[]> = {
   강릉: ['강릉시외버스터미널'],
 };
 
-export function terminalQueries(city: string): string[] {
+/** province 는 동명 지역일 때만 — 별칭(고성→간성)은 강원 고성 것이므로 다른 시도면 쓰지 않고, 검색어 앞에 시도를 붙인다. */
+export function terminalQueries(city: string, province = ''): string[] {
   const name = (city ?? '').trim();
   if (!name) return [];
-  const own = TERMINAL_ALIASES[name] ?? [];
-  const generic = [`${name} 시외버스터미널`, `${name} 버스터미널`, `${name}터미널`];
+  const own = province && province !== '강원' ? [] : TERMINAL_ALIASES[name] ?? [];
+  const prefix = province ? `${province} ` : '';
+  const generic = [`${prefix}${name} 시외버스터미널`, `${prefix}${name} 버스터미널`, `${prefix}${name}터미널`];
   return [...new Set([...own, ...generic])];
 }
 

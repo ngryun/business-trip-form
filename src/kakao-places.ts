@@ -1,3 +1,4 @@
+import { provinceShort } from './fare-region';
 import { cityFromAddress, placeQueryCandidates } from './place-region';
 import { terminalQueries, type PlacePoint } from './naver-transit';
 
@@ -12,6 +13,8 @@ const KAKAO_JS_KEY: string = import.meta.env.VITE_KAKAO_JS_KEY ?? '';
 
 export interface PlaceCity {
   city: string;
+  /** 주소의 시도 (줄인 이름: 강원·경남 …) — 동명 지역(강원 고성·경남 고성)을 가르는 데 쓴다 */
+  시도: string;
   placeName: string;
   address: string;
 }
@@ -96,14 +99,16 @@ function searchPlaces(query: string): Promise<KakaoPlace[]> {
 /**
  * 도시의 시외버스터미널 좌표 — 네이버지도 길찾기 링크용. 별칭(고성→간성시외버스터미널 등)과
  * "○○ 시외버스터미널" 같은 후보를 차례로 찾아 처음 나오는 결과를 쓴다. 못 찾으면 null.
+ * province 는 동명 지역일 때만 넘긴다 (경남 고성 → "경남 고성 시외버스터미널").
  */
-export function lookupTerminalPoint(city: string): Promise<PlacePoint | null> {
-  const key = city.trim();
-  if (!key || !isPlaceLookupEnabled()) return Promise.resolve(null);
+export function lookupTerminalPoint(city: string, province = ''): Promise<PlacePoint | null> {
+  const name = city.trim();
+  const key = `${province} ${name}`.trim();
+  if (!name || !isPlaceLookupEnabled()) return Promise.resolve(null);
   let pending = terminalCache.get(key);
   if (!pending) {
     pending = (async () => {
-      for (const query of terminalQueries(key)) {
+      for (const query of terminalQueries(name, province)) {
         const places = await searchPlaces(query);
         const hit = places.find((p) => /터미널|정류/.test(p.place_name) && p.x && p.y) ?? places[0];
         if (hit?.x && hit.y) return { name: hit.place_name, x: hit.x, y: hit.y };
@@ -136,7 +141,7 @@ export function lookupPlaceCity(query: string): Promise<PlaceCity | null> {
           const address = place.address_name || place.road_address_name;
           const city = cityFromAddress(address);
           if (city) {
-            resolve({ city, placeName: place.place_name, address });
+            resolve({ city, 시도: provinceShort(address.trim().split(/\s+/)[0] ?? ''), placeName: place.place_name, address });
             return;
           }
         }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { findOfficialFares } from '../src/bus-fares.ts';
+import { findOfficialFares, summarizeFareRows } from '../src/bus-fares.ts';
 
 const sample = {
   조회일: '2026-10-27',
@@ -32,4 +32,19 @@ test('양양은 하조대 정류장도 포함, 없는 구간은 빈 배열', () 
   assert.equal(findOfficialFares('속초', '양양', sample)[0].도착, '하조대');
   assert.deepEqual(findOfficialFares('고성', '태백', sample), []);
   assert.deepEqual(findOfficialFares('', '춘천', sample), []);
+});
+
+test('내장 자료도 시도를 가린다: 경남 고성은 간성 자료를 쓰지 않는다', () => {
+  assert.deepEqual(findOfficialFares({ 시도: '경남', 시군: '고성' }, { 시도: '서울', 시군: '서울' }, sample), []);
+  assert.equal(findOfficialFares({ 시도: '강원', 시군: '고성' }, { 시도: '서울', 시군: '서울' }, sample)[0].요금, 25500);
+});
+
+test('TAGO 배차 목록을 등급별 최저 요금으로 묶는다', () => {
+  const rows = [
+    { charge: 25500, gradeNm: '일반' }, { charge: 24000, gradeNm: '일반' },
+    { charge: 30000, gradeNm: '우등' }, { charge: 33000, gradeNm: '심야우등' }, { charge: 0, gradeNm: '일반' },
+  ];
+  const r = summarizeFareRows(rows, { 출발: '간성', 도착: '동서울', 실시간: true });
+  assert.deepEqual(r.map((f) => [f.등급, f.요금]), [['일반', 24000], ['우등', 30000]]);
+  assert.equal(r[0].실시간, true);
 });

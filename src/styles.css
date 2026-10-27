@@ -298,6 +298,10 @@ html, body {
   text-decoration: none;
   display: inline-block;
 }
+.attachment-preset-chip--region {
+  border-style: dashed;
+  color: #4b5563;
+}
 .attachment-preset-chip.is-active {
   background: #2563eb;
   border-color: #1d4ed8;

@@ -1,6 +1,7 @@
 // 국토교통부 TAGO 시외버스정보 API로 간성·속초 출발 전 구간의 요금을 받아 src/data/tago-fares.json 에 저장한다.
 //
 //   사용법:  node scripts/fetch-tago-fares.mjs
+//            node scripts/fetch-tago-fares.mjs --terminals   (전국 터미널 목록만 src/data/tago-terminals.json 에 저장)
 //   인증키:  .env.local 의 TAGO_API_KEY (또는 환경변수 TAGO_API_KEY). 저장소에는 올리지 않는다.
 //
 // API는 당일 배차 기준으로 요금을 돌려주므로, 그날 운행이 없는 구간은 빠질 수 있다.
@@ -8,9 +9,11 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { provinceShort } from '../src/fare-region.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUTPUT = resolve(root, 'src/data/tago-fares.json');
+const TERMINALS_OUTPUT = resolve(root, 'src/data/tago-terminals.json');
 const BASE = 'https://apis.data.go.kr/1613000/SuburbsBusInfo';
 const DEPARTURES = ['간성', '속초'];
 const CONCURRENCY = 2;
@@ -63,6 +66,18 @@ const cities = await call('GetCtyCodeList');
 const terminalLists = await mapLimit(cities, CONCURRENCY, (c) => call('GetSuberbsBusTrminlList', { cityCode: c.cityCode }));
 const terminals = terminalLists.flat().map((t) => ({ id: t.terminalId, name: t.terminalNm, city: t.cityName }));
 console.log(`시도 ${cities.length}곳, 터미널 ${terminals.length}곳`);
+
+if (process.argv.includes('--terminals')) {
+  // 브라우저 실시간 조회가 지역 → 터미널 id 를 찾는 데 쓰는 목록. 시도는 조회한 시도 코드 기준(줄인 이름).
+  const list = cities.flatMap((c, i) => terminalLists[i].map((t) => ({ id: t.terminalId, name: t.terminalNm, 시도: provinceShort(c.cityName) })));
+  const unknown = cities.filter((c) => !provinceShort(c.cityName));
+  if (unknown.length) throw new Error(`시도 이름을 줄이지 못했습니다: ${unknown.map((c) => c.cityName).join(', ')}`);
+  list.sort((a, b) => a.시도.localeCompare(b.시도, 'ko') || a.name.localeCompare(b.name, 'ko'));
+  mkdirSync(dirname(TERMINALS_OUTPUT), { recursive: true });
+  writeFileSync(TERMINALS_OUTPUT, JSON.stringify(list, null, 0).replace(/\},\{/g, '},\n{') + '\n');
+  console.log(`저장: ${TERMINALS_OUTPUT} (${list.length}곳)`);
+  process.exit(0);
+}
 
 const departures = DEPARTURES.map((name) => {
   const t = terminals.find((x) => x.name === name);

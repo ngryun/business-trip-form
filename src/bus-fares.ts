@@ -4,7 +4,20 @@
  * 출발지·도착지 칸의 도시명(고성, 속초, 춘천 …)이 표의 구간과 맞으면 금액을 채운다.
  * 표는 고성 출발·속초 출발만 있으므로 반대 방향(춘천→고성)은 같은 금액으로 본다.
  * 표에 없는 지역은 네이버지도 대중교통(시외버스) 최소요금 등을 확인해 직접 입력한다.
+ * 표의 고성은 강원 고성이므로 경남 고성처럼 강원 밖의 같은 이름에는 쓰지 않는다.
  */
+
+import {
+  normalizeFareCity,
+  resolveFareRegion,
+  resolveFareRoute,
+  sameNameProvinces,
+  sameRegion,
+  terminalMatches,
+  type FareRegion,
+} from './fare-region.ts';
+
+export { normalizeFareCity };
 
 export const BUS_FARE_TABLE_DATE = '2026. 1. 13.';
 
@@ -49,17 +62,6 @@ export const BUS_FARES: readonly BusFare[] = [
   { 출발: '속초', 행선지: '평창', 도착: '평창', 요금: 14400 },
 ];
 
-/** 출발지·도착지 칸의 값을 표의 도시명으로 맞춘다: 공백·시/군 제거, 간성→고성, 동서울→서울. */
-export function normalizeFareCity(text: string): string {
-  let city = (text ?? '').replace(/\s+/g, '');
-  if (!city) return '';
-  city = city.replace(/(특별자치도|특별시|광역시|특별자치시)$/, '');
-  if (city.length >= 3) city = city.replace(/[시군]$/, '');
-  if (city === '간성' || city === '간성읍') return '고성';
-  if (city === '동서울' || city === '서울시') return '서울';
-  return city;
-}
-
 /**
  * 고성 출발 구간이 표에 없으면 표의 규칙대로 "고성→속초 + 속초→목적지" 로 합산한다.
  * (표의 춘천(속초)·원주(속초)·양양(속초)이 모두 이 합산값이다.)
@@ -77,14 +79,30 @@ function derivedViaSokcho(city: string): BusFare[] {
   }));
 }
 
+type FareEnd = string | FareRegion | null;
+
+/** 칸 값(글자)이면 시도를 정하고, 이미 정한 지역이면 그대로 쓴다. */
+function routeOf(from: FareEnd, to: FareEnd): [FareRegion | null, FareRegion | null] {
+  if (typeof from === 'string' && typeof to === 'string') {
+    const route = resolveFareRoute(from, to);
+    return [route.from, route.to];
+  }
+  return [typeof from === 'string' ? resolveFareRegion(from) : from, typeof to === 'string' ? resolveFareRegion(to) : to];
+}
+
+/** 동명 지역은 강원 쪽일 때만 요금표 지역이다 (표의 고성 = 강원 고성). */
+const isTableRegion = (region: FareRegion): boolean =>
+  sameNameProvinces(region.시군).length === 0 || region.시도 === '강원';
+
 /**
  * 출발지→도착지 구간에 맞는 요금을 찾는다. 표는 고성·속초 출발만 있으므로 반대 방향도 같은 요금으로 본다.
  * 첫 항목이 기본 후보, 뒤는 같은 도시의 다른 정류장(보조) 후보. 고성 출발이 표에 없으면 속초 경유 합산.
  */
-export function findBusFares(from: string, to: string): BusFare[] {
-  const a = normalizeFareCity(from);
-  const b = normalizeFareCity(to);
-  if (!a || !b || a === b) return [];
+export function findBusFares(from: FareEnd, to: FareEnd): BusFare[] {
+  const [ra, rb] = routeOf(from, to);
+  if (!ra || !rb || sameRegion(ra, rb) || !isTableRegion(ra) || !isTableRegion(rb)) return [];
+  const a = ra.시군;
+  const b = rb.시군;
   let matches = BUS_FARES.filter((fare) =>
     (fare.출발 === a && fare.도착 === b) || (fare.출발 === b && fare.도착 === a));
   if (matches.length === 0) {
@@ -115,6 +133,10 @@ export interface OfficialFare {
   도착시도?: string;
   등급: string;
   요금: number;
+  /** 조회한 날 (YYYY-MM-DD). 없으면 자료 전체의 조회일 */
+  조회일?: string;
+  /** 브라우저에서 방금 TAGO 로 조회한 값이면 true */
+  실시간?: boolean;
 }
 
 export interface OfficialFareData {
@@ -122,39 +144,41 @@ export interface OfficialFareData {
   구간: OfficialFare[];
 }
 
-/** 출발지·도착지 도시명 → API 터미널명. 표와 같은 기준: 고성=간성, 서울=동서울. */
-const CITY_TO_TERMINALS: Record<string, string[]> = {
-  고성: ['간성'],
-  서울: ['동서울'],
-  부산: ['부산동부', '부산종합'],
-  대구: ['대구북부', '대구동부'],
-  인천: ['인천공항2터미널', '인천공항1터미널', '인천'],
-  대전: ['대전복합', '대전'],
-  양양: ['양양', '하조대'],
-  평창: ['평창', '횡계'],
-  인제: ['인제', '신남'],
-};
-
 const GRADE_ORDER = ['일반', '우등', '프리미엄'];
 const gradeRank = (grade: string): number => {
   const i = GRADE_ORDER.findIndex((g) => grade.startsWith(g));
   return i < 0 ? GRADE_ORDER.length : i;
 };
 
+/** 심야·주말 등급을 빼고 일반 → 우등 → 프리미엄 순, 같은 등급이면 싼 것부터. */
+export function sortOfficialFares(fares: readonly OfficialFare[]): OfficialFare[] {
+  return fares.filter((f) => !/심야|주말/.test(f.등급)).sort((x, y) => gradeRank(x.등급) - gradeRank(y.등급) || x.요금 - y.요금);
+}
+
+/** TAGO 배차 목록(charge·gradeNm)을 등급별 최저 요금으로 묶는다. */
+export function summarizeFareRows(
+  rows: readonly { charge?: unknown; gradeNm?: unknown }[],
+  route: Pick<OfficialFare, '출발' | '도착' | '도착시도' | '조회일' | '실시간'>,
+): OfficialFare[] {
+  const byGrade = new Map<string, number>();
+  for (const row of rows) {
+    const charge = Number(row.charge);
+    if (!Number.isFinite(charge) || charge <= 0) continue;
+    const grade = String(row.gradeNm ?? '일반');
+    byGrade.set(grade, Math.min(byGrade.get(grade) ?? Infinity, charge));
+  }
+  return sortOfficialFares([...byGrade].map(([등급, 요금]) => ({ ...route, 등급, 요금 })));
+}
+
 /**
- * 출발지→도착지의 공식 운임 후보. 자료는 간성·속초 출발만 있으므로 반대 방향은 같은 요금으로 본다.
+ * 출발지→도착지의 공식 운임 후보(내장 자료). 자료는 간성·속초 출발만 있으므로 반대 방향은 같은 요금으로 본다.
  * 일반 → 우등 → 프리미엄 순, 같은 등급이면 싼 것부터. 심야·주말 등급은 제외한다.
  */
-export function findOfficialFares(from: string, to: string, source: OfficialFareData): OfficialFare[] {
-  const a = normalizeFareCity(from);
-  const b = normalizeFareCity(to);
-  if (!a || !b || a === b) return [];
-  const match = (dep: string, arr: string): OfficialFare[] => {
-    const deps = CITY_TO_TERMINALS[dep] ?? [dep];
-    const arrs = CITY_TO_TERMINALS[arr] ?? [arr];
-    return source.구간.filter((f) => deps.includes(f.출발) && arrs.includes(f.도착) && !/심야|주말/.test(f.등급));
-  };
+export function findOfficialFares(from: FareEnd, to: FareEnd, source: OfficialFareData): OfficialFare[] {
+  const [a, b] = routeOf(from, to);
+  if (!a || !b || sameRegion(a, b)) return [];
+  const match = (dep: FareRegion, arr: FareRegion): OfficialFare[] =>
+    source.구간.filter((f) => terminalMatches(dep, f.출발) && terminalMatches(arr, f.도착, f.도착시도));
   const forward = match(a, b);
-  const found = forward.length ? forward : match(b, a);
-  return [...found].sort((x, y) => gradeRank(x.등급) - gradeRank(y.등급) || x.요금 - y.요금);
+  return sortOfficialFares(forward.length ? forward : match(b, a));
 }

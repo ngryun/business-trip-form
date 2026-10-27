@@ -17,3 +17,9 @@ test('네이버지도 대중교통 길찾기 주소', () => {
   assert.equal(url, 'https://map.naver.com/p/directions/128.4677,38.3795,%EA%B0%84%EC%84%B1%EC%8B%9C%EC%99%B8%EB%B2%84%EC%8A%A4%ED%84%B0%EB%AF%B8%EB%84%90/127.7231,37.8658,%EC%B6%98%EC%B2%9C%EC%8B%9C%EC%99%B8%EB%B2%84%EC%8A%A4%ED%84%B0%EB%AF%B8%EB%84%90/-/transit');
   assert.equal(decodeURIComponent(url).includes(',간성시외버스터미널/127.7231'), true);
 });
+
+test('동명 지역은 시도를 붙여 찾고, 강원 고성 별칭(간성)은 다른 시도에 쓰지 않는다', () => {
+  assert.deepEqual(terminalQueries('고성', '경남'), ['경남 고성 시외버스터미널', '경남 고성 버스터미널', '경남 고성터미널']);
+  assert.equal(terminalQueries('고성', '강원')[0], '간성시외버스터미널');
+  assert.equal(terminalQueries('고성')[0], '간성시외버스터미널');
+});
