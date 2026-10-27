@@ -4,6 +4,7 @@ import { getCellRegions, invalidateCellRegions } from './cell-fields';
 import { fetchTemplateBytes, loadTemplate } from './template-loader';
 import { TEMPLATE_FILES, templateKindFor, type TemplateKind } from './template-kind';
 import { applyTripNameLine } from './trip-name';
+import { BUS_FARE_TABLE_DATE, busFareLabel, findBusFares, formatWon } from './bus-fares';
 import { discoverFields, fillDateTimeRange, removeDateTimeRangeSeparator, setFieldValues, setSuppressedFareGuideLabels, type FieldMap } from './field-filler';
 import { downloadHwp } from './download';
 import { mountPreview, refreshPreview, reloadPreservingScroll, setPreviewReloadHook } from './preview';
@@ -102,6 +103,9 @@ const autoTravelDates = new Map<string, string>();
 const autoReturnLocations = new Map<string, string>();
 /** 지도 검색으로 채운 출발지·도착지 값 — 사용자가 직접 고친 값은 덮어쓰지 않으려고 기억한다. */
 const autoPlaceCities = new Map<string, string>();
+/** 요금표로 자동으로 채운 운임 금액 (input name → 값). 사용자가 직접 고친 금액은 덮어쓰지 않기 위해 기억한다. */
+const autoBusFares = new Map<string, string>();
+let syncBusFares: (() => void) | null = null;
 let liveDateTimePreviewHandler: (() => void) | null = null;
 /** 인라인 편집 핸들 — 편집 가능 칸 마커 갱신/토글에 쓴다 (부착 전에는 null). */
 let inlineEdit: InlineEditHandle | null = null;
@@ -841,6 +845,82 @@ function setupDateTimeControls(): void {
   document.getElementById('datetime-range')?.appendChild(dateTimeRangeChrome.root);
 }
 
+/**
+ * 출발지·도착지가 고성교육지원청 버스요금표(2026. 1. 13.)의 구간과 맞으면 금액을 자동으로 채우고,
+ * 금액 칸 아래에 후보 칩(같은 도시의 다른 정류장 포함)을 보여준다.
+ * 비어 있거나 전에 자동으로 채운 금액만 바꾸고, 사용자가 직접 쓴 금액은 그대로 둔다.
+ */
+function setupBusFareSuggestions(): void {
+  const wraps = [...formEl.querySelectorAll<HTMLElement>('[data-fare-suggestions]')];
+  if (wraps.length === 0) return;
+  const amountInput = (direction: string): HTMLInputElement | null => {
+    const el = formEl.elements.namedItem(`${direction}금액`);
+    return el instanceof HTMLInputElement ? el : null;
+  };
+  const setAmount = (amount: HTMLInputElement, value: string): void => {
+    autoBusFares.set(amount.name, value);
+    if (amount.value === value) return;
+    amount.value = value;
+    amount.dispatchEvent(new Event('input', { bubbles: true }));
+    amount.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  const markPressed = (wrap: HTMLElement, amount: HTMLInputElement): void => {
+    wrap.querySelectorAll<HTMLButtonElement>('button').forEach((chip) => {
+      const active = chip.dataset.amount === amount.value.trim();
+      chip.classList.toggle('is-active', active);
+      chip.setAttribute('aria-pressed', String(active));
+    });
+  };
+  const sync = (): void => {
+    for (const wrap of wraps) {
+      const direction = wrap.dataset.fareSuggestions ?? '';
+      const amount = amountInput(direction);
+      if (!amount) continue;
+      const from = (formEl.elements.namedItem(`${direction}출발지`) as HTMLInputElement | null)?.value ?? '';
+      const to = (formEl.elements.namedItem(`${direction}도착지`) as HTMLInputElement | null)?.value ?? '';
+      const fares = findBusFares(from, to);
+      const previousAuto = autoBusFares.get(amount.name);
+      const untouched = !amount.value.trim() || amount.value === previousAuto;
+      wrap.replaceChildren();
+      if (fares.length === 0) {
+        // 구간이 표에서 벗어나면 자동으로 채웠던 금액만 비운다.
+        if (previousAuto !== undefined && amount.value === previousAuto) setAmount(amount, '');
+        autoBusFares.delete(amount.name);
+        wrap.hidden = true;
+        continue;
+      }
+      wrap.hidden = false;
+      fares.forEach((fare, index) => {
+        const value = formatWon(fare.요금);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'attachment-preset-chip';
+        btn.dataset.amount = value;
+        btn.textContent = index === 0 ? `요금표 ${busFareLabel(fare)}` : `${fare.행선지} ${value}`;
+        btn.title = `고성교육지원청 버스요금표 ${BUS_FARE_TABLE_DATE} 기준 · ${fare.출발}→${fare.행선지} ${value}원`;
+        btn.setAttribute('aria-pressed', 'false');
+        btn.addEventListener('click', () => { setAmount(amount, value); markPressed(wrap, amount); });
+        wrap.appendChild(btn);
+      });
+      if (untouched) setAmount(amount, formatWon(fares[0].요금));
+      markPressed(wrap, amount);
+    }
+  };
+  for (const direction of ['갈때', '올때']) {
+    for (const suffix of ['출발지', '도착지']) {
+      const input = formEl.elements.namedItem(`${direction}${suffix}`);
+      if (!(input instanceof HTMLInputElement)) continue;
+      input.addEventListener('input', sync);
+      input.addEventListener('change', sync);
+    }
+    const amount = amountInput(direction);
+    const wrap = wraps.find((w) => w.dataset.fareSuggestions === direction);
+    if (amount && wrap) amount.addEventListener('input', () => markPressed(wrap, amount));
+  }
+  syncBusFares = sync;
+  sync();
+}
+
 function setupReturnLocationDefaults(): void {
   for (const sourceName of Object.keys(RETURN_LOCATION_DEFAULTS)) {
     const source = formEl.elements.namedItem(sourceName);
@@ -1132,6 +1212,7 @@ async function initialize(): Promise<void> {
   setDefaultSubmitDate();
   setupDateTimeControls();
   setupReturnLocationDefaults();
+  setupBusFareSuggestions();
   setupPlaceCityLookup();
   syncTemplateOnlyInputs();
   formEl.addEventListener('input', syncTemplateOnlyInputs);
@@ -1425,6 +1506,7 @@ async function initialize(): Promise<void> {
       if (applyReturnLocationDefault(label)) {
         applyReturnLocationsToPreview();
       }
+      if (label.endsWith('출발지') || label.endsWith('도착지')) syncBusFares?.();
       refreshPreviewAndRealignSignatureStamp();
       fields = discoverFields(wasm);
       saveFormState();
@@ -1707,6 +1789,7 @@ async function initialize(): Promise<void> {
     autoTravelDates.clear();
     autoReturnLocations.clear();
     autoPlaceCities.clear();
+    autoBusFares.clear();
     clearSavedFormState();
     // 일시 picker 는 hidden input 의 defaultValue 가 이전 입력값으로 굳어버려 formEl.reset() 만으로는
     // 비워지지 않는다. 명시적으로 controller + attribute 를 함께 초기화한다.
@@ -1715,6 +1798,7 @@ async function initialize(): Promise<void> {
     if (signatureInput) signatureInput.value = '';
     updateSignatureButtons();
     syncPresetChips?.();
+    syncBusFares?.();
     updateRequiredBadges();
     try {
       applyCollectedValuesToPreview(undefined, { clearEmpty: true });
