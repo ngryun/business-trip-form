@@ -18,6 +18,8 @@ export interface BusFare {
   요금: number;
   /** 같은 도시의 다른 정류장(신남·하조대·횡계)처럼 두 번째 후보일 때 true */
   보조?: boolean;
+  /** 표에 없어 합산한 구간이면 계산식 (예: "고성→속초 4,000 + 속초→삼척 13,800") */
+  환승?: string;
 }
 
 export const BUS_FARES: readonly BusFare[] = [
@@ -59,15 +61,36 @@ export function normalizeFareCity(text: string): string {
 }
 
 /**
+ * 고성 출발 구간이 표에 없으면 표의 규칙대로 "고성→속초 + 속초→목적지" 로 합산한다.
+ * (표의 춘천(속초)·원주(속초)·양양(속초)이 모두 이 합산값이다.)
+ */
+function derivedViaSokcho(city: string): BusFare[] {
+  const gosungToSokcho = BUS_FARES.find((f) => f.출발 === '고성' && f.도착 === '속초');
+  if (!gosungToSokcho || city === '속초') return [];
+  return BUS_FARES.filter((f) => f.출발 === '속초' && f.도착 === city).map((leg) => ({
+    출발: '고성',
+    행선지: `${leg.행선지}(속초)`,
+    도착: leg.도착,
+    요금: gosungToSokcho.요금 + leg.요금,
+    보조: leg.보조,
+    환승: `고성→속초 ${formatWon(gosungToSokcho.요금)} + 속초→${leg.행선지} ${formatWon(leg.요금)}`,
+  }));
+}
+
+/**
  * 출발지→도착지 구간에 맞는 요금을 찾는다. 표는 고성·속초 출발만 있으므로 반대 방향도 같은 요금으로 본다.
- * 첫 항목이 기본 후보, 뒤는 같은 도시의 다른 정류장(보조) 후보.
+ * 첫 항목이 기본 후보, 뒤는 같은 도시의 다른 정류장(보조) 후보. 고성 출발이 표에 없으면 속초 경유 합산.
  */
 export function findBusFares(from: string, to: string): BusFare[] {
   const a = normalizeFareCity(from);
   const b = normalizeFareCity(to);
   if (!a || !b || a === b) return [];
-  const matches = BUS_FARES.filter((fare) =>
+  let matches = BUS_FARES.filter((fare) =>
     (fare.출발 === a && fare.도착 === b) || (fare.출발 === b && fare.도착 === a));
+  if (matches.length === 0) {
+    if (a === '고성') matches = derivedViaSokcho(b);
+    else if (b === '고성') matches = derivedViaSokcho(a);
+  }
   return [...matches].sort((x, y) => Number(x.보조 ?? false) - Number(y.보조 ?? false));
 }
 

@@ -899,7 +899,7 @@ function setupBusFareSuggestions(): void {
         btn.className = 'attachment-preset-chip';
         btn.dataset.amount = value;
         btn.textContent = index === 0 ? `요금표 ${busFareLabel(fare)}` : `${fare.행선지} ${value}`;
-        btn.title = `고성교육지원청 버스요금표 ${BUS_FARE_TABLE_DATE} 기준 · ${fare.출발}→${fare.행선지} ${value}원`;
+        btn.title = `고성교육지원청 버스요금표 ${BUS_FARE_TABLE_DATE} 기준 · ${fare.출발}→${fare.행선지} ${value}원${fare.환승 ? ` (${fare.환승})` : ''}`;
         btn.setAttribute('aria-pressed', 'false');
         btn.addEventListener('click', () => { setAmount(amount, value); markPressed(wrap, amount); });
         wrap.appendChild(btn);

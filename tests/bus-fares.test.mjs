@@ -49,3 +49,24 @@ test('칩 문구와 금액 표기', () => {
   assert.equal(formatWon(19700), '19,700');
   assert.equal(busFareLabel(findBusFares('고성', '춘천')[0]), '고성→춘천(속초) 19,700');
 });
+
+test('고성 출발이 표에 없으면 고성→속초 4,000 + 속초→목적지로 합산한다', () => {
+  const samcheok = findBusFares('고성', '삼척');
+  assert.equal(samcheok.length, 1);
+  assert.equal(samcheok[0].요금, 17800);
+  assert.equal(samcheok[0].행선지, '삼척(속초)');
+  assert.equal(samcheok[0].환승, '고성→속초 4,000 + 속초→삼척 13,800');
+  assert.equal(findBusFares('삼척', '고성')[0].요금, 17800);
+  assert.equal(findBusFares('고성', '횡성')[0].요금, 24600);
+  assert.deepEqual(findBusFares('고성', '평창').map((f) => [f.행선지, f.요금]), [['평창(속초)', 18400], ['횡계(속초)', 14800]]);
+  assert.equal(busFareLabel(samcheok[0]), '고성→삼척(속초) 17,800');
+});
+
+test('표에 직접 있는 고성 구간은 합산하지 않고 그대로 쓴다', () => {
+  const chuncheon = findBusFares('고성', '춘천');
+  assert.equal(chuncheon.length, 1);
+  assert.equal(chuncheon[0].요금, 19700);
+  assert.equal(chuncheon[0].환승, undefined);
+  assert.equal(findBusFares('고성', '속초')[0].요금, 4000);
+  assert.deepEqual(findBusFares('고성', '태백'), []);
+});
