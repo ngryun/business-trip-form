@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cityFromAddress, joinCities, splitPlaces } from '../src/place-region.ts';
+import { cityFromAddress, joinCities, placeQueryCandidates, splitPlaces } from '../src/place-region.ts';
 
 test('여러 장소는 쉼표 등으로 나누고, 도시는 겹치지 않게 잇는다', () => {
   assert.deepEqual(splitPlaces('삼척다목적체육관, 삼척종합운동장'), ['삼척다목적체육관', '삼척종합운동장']);
@@ -26,4 +26,12 @@ test('특별시·광역시·특별자치시는 시·도 이름을 쓴다', () =>
 test('주소가 비었거나 시·군이 없으면 빈 문자열', () => {
   assert.equal(cityFromAddress(''), '');
   assert.equal(cityFromAddress('강원특별자치도'), '');
+});
+
+test('검색 질의 후보: 괄호를 떼고 뒤 단어를 하나씩 줄인다', () => {
+  assert.deepEqual(placeQueryCandidates('원주교육지원청 겨르로이실'), ['원주교육지원청 겨르로이실', '원주교육지원청']);
+  assert.deepEqual(placeQueryCandidates('강원도교육청 대회의실(3층)'), ['강원도교육청 대회의실(3층)', '강원도교육청 대회의실', '강원도교육청']);
+  assert.deepEqual(placeQueryCandidates('속초 카시아속초호텔 2층 연회장'), ['속초 카시아속초호텔 2층 연회장', '속초 카시아속초호텔 2층', '속초 카시아속초호텔', '속초']);
+  assert.deepEqual(placeQueryCandidates('  삼척다목적체육관 '), ['삼척다목적체육관']);
+  assert.deepEqual(placeQueryCandidates(''), []);
 });

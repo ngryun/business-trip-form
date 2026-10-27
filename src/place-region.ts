@@ -28,3 +28,20 @@ export function cityFromAddress(address: string): string {
   const city = district.replace(/[시군]$/, '');
   return city.length >= 2 ? city : district;
 }
+
+/**
+ * 지도 검색에 넣어 볼 질의 후보. "원주교육지원청 겨르로이실" 처럼 기관명 뒤에 회의실·층이 붙으면
+ * 검색 결과가 없으므로, 괄호 부분을 떼고 뒤 단어를 하나씩 줄여 가며 다시 찾는다.
+ * 예: "강원도교육청 대회의실(3층)" → ["강원도교육청 대회의실(3층)", "강원도교육청 대회의실", "강원도교육청"]
+ */
+export function placeQueryCandidates(text: string): string[] {
+  const out: string[] = [];
+  const push = (value: string): void => { const v = value.trim(); if (v.length >= 2 && !out.includes(v)) out.push(v); };
+  const original = text.trim();
+  push(original);
+  const stripped = original.replace(/[(\[［（][^)\]］）]*[)\]］）]/g, ' ').replace(/\s+/g, ' ').trim();
+  push(stripped);
+  const words = stripped.split(' ');
+  for (let n = words.length - 1; n >= 1; n--) push(words.slice(0, n).join(' '));
+  return out;
+}

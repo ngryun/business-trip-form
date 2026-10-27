@@ -16,7 +16,7 @@ import { SignatureStampManager, type StoredSignatureStamp } from './signature-st
 import { createDefaultStamp, openStampGenerator } from './stamp-generator';
 import { printPdf, type PdfSaveResult } from './print-pdf';
 import { pushRecentValue } from './recent-values';
-import { isPlaceLookupEnabled, lookupPlaceCity, type PlaceCity } from './kakao-places';
+import { isPlaceLookupEnabled, lookupPlaceCityLoose, type PlaceCity } from './kakao-places';
 import { joinCities, splitPlaces } from './place-region';
 import { defaultSubmitDate } from './date-range';
 import {
@@ -968,7 +968,7 @@ async function applyPlaceCity(sourceName: string): Promise<void> {
 
   let found: PlaceCity[];
   try {
-    const results = await Promise.all(splitPlaces(query).map((place) => lookupPlaceCity(place)));
+    const results = await Promise.all(splitPlaces(query).map((place) => lookupPlaceCityLoose(place)));
     found = results.filter((result): result is PlaceCity => result !== null);
   } catch (err) {
     console.error(err);

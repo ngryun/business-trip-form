@@ -1,4 +1,4 @@
-import { cityFromAddress } from './place-region';
+import { cityFromAddress, placeQueryCandidates } from './place-region';
 
 /**
  * 카카오맵 JavaScript SDK 장소 검색으로 소속·출장지가 있는 도시를 찾는다.
@@ -61,6 +61,18 @@ function loadSdk(): Promise<KakaoServices> {
     throw err;
   });
   return sdkPromise;
+}
+
+/**
+ * 장소 이름으로 찾되, 결과가 없으면 괄호를 떼고 뒤 단어를 줄여 가며 다시 찾는다.
+ * "원주교육지원청 겨르로이실" → 검색 실패 → "원주교육지원청" 으로 찾는다.
+ */
+export async function lookupPlaceCityLoose(query: string): Promise<PlaceCity | null> {
+  for (const candidate of placeQueryCandidates(query)) {
+    const found = await lookupPlaceCity(candidate);
+    if (found) return found;
+  }
+  return null;
 }
 
 /** 장소 이름으로 검색해 첫 결과의 도시명을 돌려준다. 결과가 없으면 null. */
