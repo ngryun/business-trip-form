@@ -16,7 +16,8 @@ import { SignatureStampManager, type StoredSignatureStamp } from './signature-st
 import { createDefaultStamp, openStampGenerator } from './stamp-generator';
 import { printPdf, type PdfSaveResult } from './print-pdf';
 import { pushRecentValue } from './recent-values';
-import { isPlaceLookupEnabled, lookupPlaceCityLoose, type PlaceCity } from './kakao-places';
+import { isPlaceLookupEnabled, lookupPlaceCityLoose, lookupTerminalPoint, type PlaceCity } from './kakao-places';
+import { naverTransitUrl } from './naver-transit';
 import { joinCities, splitPlaces } from './place-region';
 import { defaultSubmitDate } from './date-range';
 import {
@@ -887,6 +888,7 @@ function setupBusFareSuggestions(): void {
         if (previousAuto !== undefined && amount.value === previousAuto) setAmount(amount, '');
         autoBusFares.delete(amount.name);
         wrap.hidden = true;
+        renderNaverLink(wrap, from, to);
         continue;
       }
       wrap.hidden = false;
@@ -905,6 +907,25 @@ function setupBusFareSuggestions(): void {
       if (untouched) setAmount(amount, formatWon(fares[0].요금));
       markPressed(wrap, amount);
     }
+  };
+  /** 요금표에 없는 구간: 출발·도착 터미널 좌표를 찾아 네이버지도 대중교통 길찾기 링크를 보여준다. */
+  const linkTokens = new Map<HTMLElement, number>();
+  const renderNaverLink = (wrap: HTMLElement, from: string, to: string): void => {
+    const token = (linkTokens.get(wrap) ?? 0) + 1;
+    linkTokens.set(wrap, token);
+    if (!isPlaceLookupEnabled() || !from.trim() || !to.trim() || from.trim() === to.trim()) return;
+    void Promise.all([lookupTerminalPoint(from), lookupTerminalPoint(to)]).then(([start, goal]) => {
+      if (linkTokens.get(wrap) !== token || !start || !goal) return;
+      const link = document.createElement('a');
+      link.className = 'attachment-preset-chip attachment-preset-chip--link';
+      link.href = naverTransitUrl(start, goal);
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = '네이버지도에서 시외버스 요금 확인 ↗';
+      link.title = `${start.name} → ${goal.name} 대중교통 길찾기. 시외버스 최소요금을 확인해 금액에 입력하세요.`;
+      wrap.replaceChildren(link);
+      wrap.hidden = false;
+    }).catch((err) => console.error(err));
   };
   for (const direction of ['갈때', '올때']) {
     for (const suffix of ['출발지', '도착지']) {

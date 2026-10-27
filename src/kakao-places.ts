@@ -1,4 +1,5 @@
 import { cityFromAddress, placeQueryCandidates } from './place-region';
+import { terminalQueries, type PlacePoint } from './naver-transit';
 
 /**
  * 카카오맵 JavaScript SDK 장소 검색으로 소속·출장지가 있는 도시를 찾는다.
@@ -19,6 +20,10 @@ interface KakaoPlace {
   place_name: string;
   address_name: string;
   road_address_name: string;
+  /** 경도 */
+  x: string;
+  /** 위도 */
+  y: string;
 }
 
 interface KakaoServices {
@@ -73,6 +78,42 @@ export async function lookupPlaceCityLoose(query: string): Promise<PlaceCity | n
     if (found) return found;
   }
   return null;
+}
+
+const terminalCache = new Map<string, Promise<PlacePoint | null>>();
+
+/** 키워드 검색 결과 목록. 결과가 없으면 빈 배열. */
+function searchPlaces(query: string): Promise<KakaoPlace[]> {
+  return loadSdk().then((services) => new Promise<KakaoPlace[]>((resolve, reject) => {
+    new services.Places().keywordSearch(query, (data, status) => {
+      if (status === services.Status.ZERO_RESULT) { resolve([]); return; }
+      if (status !== services.Status.OK) { reject(new Error('장소 검색에 실패했습니다.')); return; }
+      resolve(data);
+    }, { size: 5 });
+  }));
+}
+
+/**
+ * 도시의 시외버스터미널 좌표 — 네이버지도 길찾기 링크용. 별칭(고성→간성시외버스터미널 등)과
+ * "○○ 시외버스터미널" 같은 후보를 차례로 찾아 처음 나오는 결과를 쓴다. 못 찾으면 null.
+ */
+export function lookupTerminalPoint(city: string): Promise<PlacePoint | null> {
+  const key = city.trim();
+  if (!key || !isPlaceLookupEnabled()) return Promise.resolve(null);
+  let pending = terminalCache.get(key);
+  if (!pending) {
+    pending = (async () => {
+      for (const query of terminalQueries(key)) {
+        const places = await searchPlaces(query);
+        const hit = places.find((p) => /터미널|정류/.test(p.place_name) && p.x && p.y) ?? places[0];
+        if (hit?.x && hit.y) return { name: hit.place_name, x: hit.x, y: hit.y };
+      }
+      return null;
+    })();
+    pending.catch(() => terminalCache.delete(key));
+    terminalCache.set(key, pending);
+  }
+  return pending;
 }
 
 /** 장소 이름으로 검색해 첫 결과의 도시명을 돌려준다. 결과가 없으면 null. */

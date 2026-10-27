@@ -289,6 +289,10 @@ html, body {
   border-color: #93c5fd;
   outline: none;
 }
+.attachment-preset-chip--link {
+  text-decoration: none;
+  display: inline-block;
+}
 .attachment-preset-chip.is-active {
   background: #2563eb;
   border-color: #1d4ed8;
