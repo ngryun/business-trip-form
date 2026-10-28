@@ -1045,9 +1045,23 @@ function setupBusFareSuggestions(): void {
   /**
    * 실시간 공식 운임: 입력이 멈추면 TAGO 를 조회해 내장 자료의 공식 운임 칩을 오늘 배차 기준 값으로 바꾼다.
    * 요금표 구간이면 금액이 다를 때만 경고 칩, 요금표에 없는 구간이면 금액도 자동으로 채운다. 실패하면 내장 자료를 그대로 둔다.
+   * 요금표에 없는 구간은 조회하는 동안 "실시간 운임 조회 중…", 시외·고속버스 모두 직행 배차가 없으면 "직행 노선 정보 없음" 을 보여 준다.
    */
   const liveTokens = new Map<HTMLElement, number>();
   const liveTimers = new Map<HTMLElement, number>();
+  /** 이번 페이지에서 조회를 마친 구간 (시도 시군>시도 시군:날짜 → 결과) — 다시 그릴 때 "조회 중" 을 거치지 않고 바로 보여 준다 */
+  const liveResults = new Map<string, OfficialFare[]>();
+  /** 운임 칩 사이에 넣는 안내 문구 (조회 중·직행 노선 없음) — 누를 수 없는 칩 */
+  const liveStatus = (wrap: HTMLElement, text: string, title: string): void => {
+    wrap.querySelectorAll('[data-live-status]').forEach((el) => el.remove());
+    const note = document.createElement('span');
+    note.className = 'attachment-preset-chip attachment-preset-chip--status';
+    note.dataset.liveStatus = '';
+    note.textContent = text;
+    note.title = title;
+    wrap.insertBefore(note, wrap.querySelector('[data-region-switch], a'));
+    wrap.hidden = false;
+  };
   const renderLiveFares = (
     wrap: HTMLElement,
     amount: HTMLInputElement,
@@ -1059,21 +1073,45 @@ function setupBusFareSuggestions(): void {
     window.clearTimeout(liveTimers.get(wrap));
     const { from, to } = route;
     if (!isLiveFareEnabled() || !from || !to || sameRegion(from, to)) return;
-    liveTimers.set(wrap, window.setTimeout(() => {
-      fetchLiveFares(from, to).then((live) => {
-        if (liveTokens.get(wrap) !== token || live.length === 0) return;
-        wrap.querySelectorAll('[data-official]').forEach((chip) => chip.remove());
-        const before = wrap.querySelector('[data-region-switch], a');
-        const insert = (chip: HTMLElement): void => { wrap.insertBefore(chip, before); };
-        if (tableFares.length > 0) {
-          if (live[0].요금 !== tableFares[0].요금) insert(officialChip(wrap, amount, live[0], true));
-        } else {
-          live.forEach((fare) => insert(officialChip(wrap, amount, fare, false)));
-          if (isUntouched(amount)) setAmount(amount, formatWon(live[0].요금));
+    // 날짜를 넣어 두면 창을 하루 넘게 열어 둬도 그날 배차로 다시 조회한다.
+    const routeKey = `${from.시도} ${from.시군}>${to.시도} ${to.시군}:${new Date().toDateString()}`;
+    const apply = (live: OfficialFare[]): void => {
+      wrap.querySelectorAll('[data-live-status]').forEach((el) => el.remove());
+      if (live.length === 0) {
+        // 요금표·내장 자료에도 없는 구간이면, 실시간 조회로도 못 찾았다고 알려 준다.
+        if (tableFares.length === 0 && !wrap.querySelector('[data-official]')) {
+          liveStatus(wrap, '직행 노선 정보 없음', `국토교통부 시외버스·고속버스정보(TAGO)에 ${regionLabel(from)}→${regionLabel(to)} 직행 배차가 없습니다. 갈아타는 구간은 네이버지도 등에서 요금을 확인해 입력하세요.`);
         }
-        wrap.hidden = false;
-        markPressed(wrap, amount);
-      }).catch((err) => console.error(err));
+        return;
+      }
+      wrap.querySelectorAll('[data-official]').forEach((chip) => chip.remove());
+      const before = wrap.querySelector('[data-region-switch], a');
+      const insert = (chip: HTMLElement): void => { wrap.insertBefore(chip, before); };
+      if (tableFares.length > 0) {
+        if (live[0].요금 !== tableFares[0].요금) insert(officialChip(wrap, amount, live[0], true));
+      } else {
+        live.forEach((fare) => insert(officialChip(wrap, amount, fare, false)));
+        if (isUntouched(amount)) setAmount(amount, formatWon(live[0].요금));
+      }
+      wrap.hidden = false;
+      markPressed(wrap, amount);
+    };
+    const known = liveResults.get(routeKey);
+    if (known) { apply(known); return; }
+    liveTimers.set(wrap, window.setTimeout(() => {
+      // 요금표 구간은 비교용이라 조용히 조회하고, 요금표에 없는 구간만 조회 중임을 보여 준다.
+      if (tableFares.length === 0) liveStatus(wrap, '실시간 운임 조회 중…', '국토교통부 시외버스·고속버스정보(TAGO)에서 오늘 배차 요금을 조회하고 있습니다.');
+      fetchLiveFares(from, to).then((live) => {
+        liveResults.set(routeKey, live);
+        if (liveTokens.get(wrap) === token) apply(live);
+      }).catch((err) => {
+        console.error(err);
+        if (liveTokens.get(wrap) !== token) return;
+        wrap.querySelectorAll('[data-live-status]').forEach((el) => el.remove());
+        if (tableFares.length === 0 && !wrap.querySelector('[data-official]')) {
+          liveStatus(wrap, '실시간 조회 실패', '국토교통부 시외버스·고속버스정보(TAGO) 조회에 실패했습니다. 잠시 뒤 다시 입력하거나 네이버지도에서 요금을 확인하세요.');
+        }
+      });
     }, LIVE_FARE_DELAY_MS));
   };
   for (const direction of ['갈때', '올때']) {
