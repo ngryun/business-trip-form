@@ -48,3 +48,13 @@ test('TAGO 배차 목록을 등급별 최저 요금으로 묶는다', () => {
   assert.deepEqual(r.map((f) => [f.등급, f.요금]), [['일반', 24000], ['우등', 30000]]);
   assert.equal(r[0].실시간, true);
 });
+
+test('고속버스 등급: 고속(일반) → 우등 → 프리미엄, 심야는 뺀다', () => {
+  const rows = [
+    { charge: 32700, gradeNm: '우등' }, { charge: 39200, gradeNm: '심야우등' },
+    { charge: 22100, gradeNm: '고속' }, { charge: 34000, gradeNm: '프리미엄' },
+  ];
+  const r = summarizeFareRows(rows, { 출발: '서울경부', 도착: '동대구', 실시간: true, 고속: true });
+  assert.deepEqual(r.map((f) => [f.등급, f.요금]), [['고속', 22100], ['우등', 32700], ['프리미엄', 34000]]);
+  assert.equal(r[0].고속, true);
+});

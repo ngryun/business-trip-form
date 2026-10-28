@@ -911,11 +911,14 @@ function setupBusFareSuggestions(): void {
     btn.className = differs ? 'attachment-preset-chip attachment-preset-chip--warn' : 'attachment-preset-chip';
     btn.dataset.amount = value;
     btn.dataset.official = '';
-    btn.textContent = `공식 운임 ${fare.등급} ${value}${differs ? ' · 요금표와 다름' : ''}`;
+    // 고속버스 등급 "고속" 은 일반 고속버스라 칩에는 "고속버스 일반" 으로 쓴다.
+    const grade = fare.고속 ? `고속버스 ${fare.등급 === '고속' ? '일반' : fare.등급}` : fare.등급;
+    btn.textContent = `공식 운임 ${grade} ${value}${differs ? ' · 요금표와 다름' : ''}`;
+    const info = fare.고속 ? '고속버스정보' : '시외버스정보';
     const source = fare.실시간
-      ? `국토교통부 시외버스정보(TAGO) 실시간 조회 · ${fare.조회일} 배차 기준`
-      : `국토교통부 시외버스정보(TAGO) ${fare.조회일 ?? OFFICIAL_FARES.조회일} 조회`;
-    btn.title = `${source} · ${fare.출발}→${fare.도착} ${fare.등급} ${value}원${differs ? '. 교육지원청 요금표와 금액이 다르니 어느 쪽을 쓸지 확인하세요.' : ''}`;
+      ? `국토교통부 ${info}(TAGO) 실시간 조회 · ${fare.조회일} 배차 기준`
+      : `국토교통부 ${info}(TAGO) ${fare.조회일 ?? OFFICIAL_FARES.조회일} 조회`;
+    btn.title = `${source} · ${fare.출발}→${fare.도착} ${grade} ${value}원${differs ? '. 교육지원청 요금표와 금액이 다르니 어느 쪽을 쓸지 확인하세요.' : ''}`;
     btn.setAttribute('aria-pressed', 'false');
     btn.addEventListener('click', () => { setAmount(amount, value); markPressed(wrap, amount); });
     return btn;

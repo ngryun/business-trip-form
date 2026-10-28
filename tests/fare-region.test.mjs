@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   alternativeRegions,
+  expressTerminalsForRegion,
   parseFareRegion,
   provinceShort,
   regionLabel,
@@ -12,6 +13,7 @@ import {
 } from '../src/fare-region.ts';
 import { findBusFares } from '../src/bus-fares.ts';
 import terminals from '../src/data/tago-terminals.json' with { type: 'json' };
+import expressTerminals from '../src/data/tago-express-terminals.json' with { type: 'json' };
 
 test('시도 이름 줄이기: 정식·옛 이름 모두', () => {
   assert.equal(provinceShort('강원특별자치도'), '강원');
@@ -86,4 +88,18 @@ test('지역 → TAGO 터미널: 별칭, 같은 이름, 이름 앞부분, 시도
   assert.equal(names({ 시도: '충북', 시군: '청주' })[0], '청주');
   assert.equal(names({ 시도: '강원', 시군: '춘천' })[0], '춘천');
   assert.deepEqual(names({ 시도: '강원', 시군: '없는곳' }), []);
+});
+
+test('지역 → 고속버스 터미널: 같은 이름의 id 를 모두, 앞 이름 두 개까지, 고속버스 없는 곳은 빈 배열', () => {
+  const pick = (region) => expressTerminalsForRegion(region, expressTerminals);
+  const seoul = pick({ 시도: '서울', 시군: '서울' });
+  assert.deepEqual([...new Set(seoul.map((t) => t.name))], ['동서울', '서울경부']);
+  assert.equal(seoul.filter((t) => t.name === '동서울').length, 4);
+  assert.ok(pick({ 시도: '대구', 시군: '대구' }).every((t) => t.name === '동대구'));
+  assert.equal(pick({ 시도: '대구', 시군: '대구' }).length, 6);
+  assert.deepEqual(pick({ 시도: '강원', 시군: '강릉' }).map((t) => t.name), ['강릉', '주문진']);
+  assert.deepEqual(pick({ 시도: '경기', 시군: '광주' }).map((t) => t.name), ['경기광주']);
+  assert.equal(pick({ 시도: '광주', 시군: '광주' })[0].name, '광주(유·스퀘어)');
+  assert.deepEqual(pick({ 시도: '강원', 시군: '철원' }).map((t) => t.name), ['신철원', '철원']);
+  assert.deepEqual(pick({ 시도: '강원', 시군: '고성' }), []);
 });

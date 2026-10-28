@@ -2,19 +2,23 @@
 //
 //   사용법:  node scripts/fetch-tago-fares.mjs
 //            node scripts/fetch-tago-fares.mjs --terminals   (전국 터미널 목록만 src/data/tago-terminals.json 에 저장)
+//            node scripts/fetch-tago-fares.mjs --express-terminals   (고속버스 터미널 목록만 src/data/tago-express-terminals.json 에 저장)
 //   인증키:  .env.local 의 TAGO_API_KEY (또는 환경변수 TAGO_API_KEY). 저장소에는 올리지 않는다.
+//            고속버스 목록은 같은 키에 "국토교통부_(TAGO)_고속버스정보" 활용신청이 되어 있어야 한다.
 //
 // API는 당일 배차 기준으로 요금을 돌려주므로, 그날 운행이 없는 구간은 빠질 수 있다.
 // 결과 파일은 앱에 내장되어 "공식 운임" 참고값으로 쓰이며, 교육지원청 기준표(bus-fares.ts)가 우선이다.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { provinceShort } from '../src/fare-region.ts';
+import { provinceShort, resolveFareRegion } from '../src/fare-region.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUTPUT = resolve(root, 'src/data/tago-fares.json');
 const TERMINALS_OUTPUT = resolve(root, 'src/data/tago-terminals.json');
+const EXPRESS_TERMINALS_OUTPUT = resolve(root, 'src/data/tago-express-terminals.json');
 const BASE = 'https://apis.data.go.kr/1613000/SuburbsBusInfo';
+const EXPRESS_BASE = 'https://apis.data.go.kr/1613000/ExpBusInfo';
 const DEPARTURES = ['간성', '속초'];
 const CONCURRENCY = 2;
 const PAUSE_MS = 150; // 초당 호출 제한(LIMITED_NUMBER_OF_SERVICE_REQUESTS_PER_SECOND) 회피
@@ -32,11 +36,11 @@ function loadKey() {
 const rawKey = loadKey();
 const key = rawKey.includes('%') ? rawKey : encodeURIComponent(rawKey);
 
-async function call(op, params = {}, attempt = 0) {
+async function call(op, params = {}, base = BASE, attempt = 0) {
   const qs = Object.entries({ _type: 'json', numOfRows: 200, pageNo: 1, ...params })
     .map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
   try {
-    const res = await fetch(`${BASE}/${op}?serviceKey=${key}&${qs}`);
+    const res = await fetch(`${base}/${op}?serviceKey=${key}&${qs}`);
     const text = await res.text();
     const json = JSON.parse(text);
     const code = json?.response?.header?.resultCode;
@@ -45,7 +49,7 @@ async function call(op, params = {}, attempt = 0) {
     return Array.isArray(it) ? it : it ? [it] : [];
   } catch (err) {
     const limited = /LIMITED_NUMBER_OF_SERVICE_REQUESTS/.test(String(err.message));
-    if (attempt < (limited ? 6 : 2)) { await new Promise((r) => setTimeout(r, (limited ? 1500 : 800) * (attempt + 1))); return call(op, params, attempt + 1); }
+    if (attempt < (limited ? 6 : 2)) { await new Promise((r) => setTimeout(r, (limited ? 1500 : 800) * (attempt + 1))); return call(op, params, base, attempt + 1); }
     throw err;
   }
 }
@@ -76,6 +80,43 @@ if (process.argv.includes('--terminals')) {
   mkdirSync(dirname(TERMINALS_OUTPUT), { recursive: true });
   writeFileSync(TERMINALS_OUTPUT, JSON.stringify(list, null, 0).replace(/\},\{/g, '},\n{') + '\n');
   console.log(`저장: ${TERMINALS_OUTPUT} (${list.length}곳)`);
+  process.exit(0);
+}
+
+if (process.argv.includes('--express-terminals')) {
+  // 고속버스 터미널 목록에는 시도가 없다 (도시코드로 걸러지지도 않는다). 시도는 아래 순서로 정한다:
+  //   직접 정한 이름 → 시외버스 목록의 같은 이름(시도가 하나일 때) → 이름 앞부분·괄호 속 시군 → 터미널 id 대역.
+  // id 대역은 이름으로 못 정한 정류장(경포해변 등)에만 쓰이고, 이런 곳은 지역 이름으로 찾히지 않으므로 대략이면 된다.
+  const OVERRIDES = { 동대구: '대구', 서대구: '대구', 대구용계: '대구', 대구혁신: '대구', 대구공항: '대구', 유성복합: '대전', 신탄진역: '대전', 상봉: '서울', 동래: '부산', 조치원: '세종', 광주비아: '광주', 광주운암: '광주', '광주(유·스퀘어)': '광주', 김포공항: '서울', 신철원: '강원', 청평: '경기' };
+  const ID_BANDS = ['서울', '경기', '강원', '충남', '충북', '전남', '전북', '경남', '경북'];
+  const JUNK = /통합단말|모바일|수수료|구간$|공항왕복|라쿠카라차/;
+  const suburbsProvinces = new Map();
+  cities.forEach((c, i) => terminalLists[i].forEach((t) => {
+    suburbsProvinces.set(t.terminalNm, new Set([...(suburbsProvinces.get(t.terminalNm) ?? []), provinceShort(c.cityName)]));
+  }));
+  const byName = (name) => {
+    const candidates = [name.match(/[(（]([^)）]+)[)）]/)?.[1], ...Array.from({ length: name.length - 1 }, (_, i) => name.slice(0, name.length - i))];
+    for (const part of candidates) {
+      const region = part ? resolveFareRegion(part) : null;
+      if (region?.시도 && !region.추정) return region.시도;
+    }
+    return '';
+  };
+  const items = await call('GetExpBusTrminlList', { numOfRows: 1000 }, EXPRESS_BASE);
+  const guessed = [];
+  const list = items.filter((t) => !JUNK.test(t.terminalNm)).map((t) => {
+    const name = t.terminalNm;
+    const suburbs = suburbsProvinces.get(name);
+    let 시도 = OVERRIDES[name] ?? (suburbs?.size === 1 ? [...suburbs][0] : '') ?? '';
+    if (!시도) 시도 = byName(name);
+    if (!시도) { 시도 = ID_BANDS[Number(t.terminalId.slice(4, 5))] ?? ''; guessed.push(`${name}(${시도})`); }
+    return { id: t.terminalId, name, 시도 };
+  });
+  list.sort((a, b) => a.시도.localeCompare(b.시도, 'ko') || a.name.localeCompare(b.name, 'ko') || a.id.localeCompare(b.id));
+  mkdirSync(dirname(EXPRESS_TERMINALS_OUTPUT), { recursive: true });
+  writeFileSync(EXPRESS_TERMINALS_OUTPUT, JSON.stringify(list, null, 0).replace(/\},\{/g, '},\n{') + '\n');
+  console.log(`저장: ${EXPRESS_TERMINALS_OUTPUT} (${list.length}곳, 전체 ${items.length}곳 중 단말·수수료 항목 제외)`);
+  console.log(`id 대역으로 시도를 정한 곳 ${guessed.length}곳: ${guessed.join(', ')}`);
   process.exit(0);
 }
 

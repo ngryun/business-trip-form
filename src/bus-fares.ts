@@ -137,6 +137,8 @@ export interface OfficialFare {
   조회일?: string;
   /** 브라우저에서 방금 TAGO 로 조회한 값이면 true */
   실시간?: boolean;
+  /** 시외버스에 없어 TAGO 고속버스정보에서 찾은 값이면 true (등급 "고속" 은 일반 고속버스) */
+  고속?: boolean;
 }
 
 export interface OfficialFareData {
@@ -144,7 +146,7 @@ export interface OfficialFareData {
   구간: OfficialFare[];
 }
 
-const GRADE_ORDER = ['일반', '우등', '프리미엄'];
+const GRADE_ORDER = ['일반', '고속', '우등', '프리미엄'];
 const gradeRank = (grade: string): number => {
   const i = GRADE_ORDER.findIndex((g) => grade.startsWith(g));
   return i < 0 ? GRADE_ORDER.length : i;
@@ -158,7 +160,7 @@ export function sortOfficialFares(fares: readonly OfficialFare[]): OfficialFare[
 /** TAGO 배차 목록(charge·gradeNm)을 등급별 최저 요금으로 묶는다. */
 export function summarizeFareRows(
   rows: readonly { charge?: unknown; gradeNm?: unknown }[],
-  route: Pick<OfficialFare, '출발' | '도착' | '도착시도' | '조회일' | '실시간'>,
+  route: Pick<OfficialFare, '출발' | '도착' | '도착시도' | '조회일' | '실시간' | '고속'>,
 ): OfficialFare[] {
   const byGrade = new Map<string, number>();
   for (const row of rows) {

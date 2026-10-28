@@ -212,8 +212,32 @@ const TERMINAL_ALIASES: Record<string, string[]> = {
   포천: ['일동'],
 };
 
-function terminalAliases(region: FareRegion): string[] | undefined {
-  return TERMINAL_ALIASES[`${region.시도} ${region.시군}`] ?? TERMINAL_ALIASES[region.시군];
+/**
+ * 고속버스 터미널(src/data/tago-express-terminals.json)은 이름이 시외버스와 달라 따로 덮어쓴다 (나머지는 시외버스 별칭을 쓴다).
+ * 빈 목록은 고속버스가 없는 곳이다.
+ */
+export const EXPRESS_TERMINAL_ALIASES: Record<string, string[]> = {
+  ...TERMINAL_ALIASES,
+  '강원 고성': [],
+  '경남 고성': [],
+  '광주 광주': ['광주(유·스퀘어)', '광주비아'],
+  '경기 광주': ['경기광주'],
+  서울: ['동서울', '서울경부', '센트럴시티(서울)', '상봉', '서울남부'],
+  부산: ['부산', '부산사상', '동래'],
+  대구: ['동대구', '서대구', '대구서부'],
+  대전: ['대전복합', '유성복합'],
+  세종: ['세종터미널', '세종시외', '조치원'],
+  인천: ['인천'],
+  울산: ['울산', '울산신복'],
+  경주: ['경주'],
+  파주: ['파주문산', '파주운정'],
+  철원: ['신철원', '철원'],
+  포천: ['포천'],
+  정선: ['정선', '고한사북'],
+};
+
+function terminalAliases(region: FareRegion, table = TERMINAL_ALIASES): string[] | undefined {
+  return table[`${region.시도} ${region.시군}`] ?? table[region.시군];
 }
 
 /** 터미널 이름이 그 지역의 것인가 — 별칭 목록, 같은 이름, 시군 이름으로 시작("수원터미널"), "(시군)" 표기 순. */
@@ -226,9 +250,13 @@ export function terminalMatches(region: FareRegion, name: string, province = '')
 }
 
 /** 지역의 터미널 후보 — 별칭 순서, 같은 이름, 시군 이름으로 시작, "(시군)" 표기 순. 시도가 있으면 그 시도 안에서만. */
-export function terminalsForRegion(region: FareRegion, terminals: readonly TagoTerminal[]): TagoTerminal[] {
+export function terminalsForRegion(
+  region: FareRegion,
+  terminals: readonly TagoTerminal[],
+  aliasTable: Record<string, string[]> = TERMINAL_ALIASES,
+): TagoTerminal[] {
   const pool = region.시도 ? terminals.filter((t) => t.시도 === region.시도) : terminals;
-  const aliases = terminalAliases(region);
+  const aliases = terminalAliases(region, aliasTable);
   if (aliases) return aliases.flatMap((name) => pool.filter((t) => t.name === name));
   const ranked = [
     ...pool.filter((t) => t.name === region.시군),
@@ -236,4 +264,14 @@ export function terminalsForRegion(region: FareRegion, terminals: readonly TagoT
     ...pool.filter((t) => t.name.includes(`(${region.시군})`)),
   ];
   return [...new Set(ranked)];
+}
+
+/**
+ * 고속버스 터미널 후보. 고속버스는 같은 이름의 터미널이 노선별로 id 가 여럿이라(동서울 4개, 동대구 7개) 앞의 이름 두 개의
+ * id 를 모두 넣고, 조회 횟수를 생각해 최대 limit 곳으로 자른다.
+ */
+export function expressTerminalsForRegion(region: FareRegion, terminals: readonly TagoTerminal[], limit = 6): TagoTerminal[] {
+  const ranked = terminalsForRegion(region, terminals, EXPRESS_TERMINAL_ALIASES);
+  const names = [...new Set(ranked.map((t) => t.name))].slice(0, 2);
+  return ranked.filter((t) => names.includes(t.name)).slice(0, limit);
 }
