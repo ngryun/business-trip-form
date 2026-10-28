@@ -14,7 +14,13 @@ import { downloadHwp } from './download';
 import { mountPreview, refreshPreview, reloadPreservingScroll, setPreviewReloadHook } from './preview';
 import { registerFontFaces, preloadFonts } from './fonts';
 import { attachInlineEditing, type InlineEditHandle } from './field-interaction';
-import { buildDateTimeRangeChrome, showStampPopover, type FareDirection, type RangeChromeHandle } from './field-popover';
+import {
+  buildDateTimeRangeChrome,
+  showStampPopover,
+  type FareDirection,
+  type PopoverExtrasContext,
+  type RangeChromeHandle,
+} from './field-popover';
 import { setupDateTimePicker, type DateTimePickerController } from './datetime-picker';
 import { SignatureStampManager, type StoredSignatureStamp } from './signature-stamp';
 import { createDefaultStamp, openStampGenerator } from './stamp-generator';
@@ -381,6 +387,24 @@ function focusMissingRequired(item: MissingRequiredField): void {
     : item.control;
   target?.focus();
   target?.scrollIntoView({ block: 'center' });
+}
+
+/**
+ * 미리보기에서 칸을 눌렀을 때 사이드패널에 그 칸의 입력이 든 탭을 보여 준다.
+ * 폼 패널을 접어 둔 상태면 그대로 둔다 (펼치지 않는다). 포커스는 팝오버에 남겨 둔다.
+ */
+function revealFormControl(name: string): void {
+  if (appBodyEl.classList.contains('panel-collapsed')) return;
+  const control = formEl.elements.namedItem(name === '이름' ? '성명' : name);
+  const el = control instanceof RadioNodeList ? control[0] : control;
+  if (!(el instanceof HTMLElement)) return;
+  const panel = el.closest<HTMLElement>('.form-tab-panel');
+  if (panel?.hidden) formEl.querySelector<HTMLButtonElement>(`[data-form-tab][aria-controls="${panel.id}"]`)?.click();
+  // 숨은 입력(일시)은 화면에 보이는 선택기 쪽으로 스크롤한다
+  const visible = el instanceof HTMLInputElement && el.type === 'hidden'
+    ? el.closest<HTMLElement>('label, fieldset') ?? el.parentElement
+    : el;
+  visible?.scrollIntoView({ block: 'nearest' });
 }
 
 /**
@@ -876,7 +900,7 @@ function withEuro(word: string): string {
 /**
  * 출발지·도착지가 고성교육지원청 버스요금표(2026. 1. 13.)의 구간과 맞으면 금액을 자동으로 채우고,
  * 금액 칸 아래에 후보 칩(같은 도시의 다른 정류장 포함)을 보여준다.
- * 표에 없는 구간은 TAGO 공식 운임(내장 자료, 이어서 실시간 조회)을 제안하고 네이버지도 길찾기 링크를 둔다.
+ * 표에 없는 구간은 TAGO 공식 운임(내장 자료, 이어서 실시간 조회)을 제안한다. 네이버지도 길찾기 링크는 구간마다 둔다.
  * 비어 있거나 전에 자동으로 채운 금액만 바꾸고, 사용자가 직접 쓴 금액은 그대로 둔다.
  * 동명 지역(강원 고성·경남 고성, 광주광역시·경기 광주)은 시도를 정해 계산하고, 짐작해 정했으면 바꾸기 칩을 보여준다.
  */
@@ -991,13 +1015,14 @@ function setupBusFareSuggestions(): void {
         .forEach((chip) => wrap.appendChild(chip));
       wrap.hidden = wrap.childElementCount === 0;
       markPressed(wrap, amount);
-      if (fares.length === 0) renderNaverLink(wrap, route.from, route.to, official.length > 0);
+      // 요금표·공식 운임이 있어도 네이버지도에서 맞춰 볼 수 있게 링크는 늘 둔다
+      renderNaverLink(wrap, route.from, route.to);
       renderLiveFares(wrap, amount, route, fares);
     }
   };
-  /** 요금표에 없는 구간: 출발·도착 터미널 좌표를 찾아 네이버지도 대중교통 길찾기 링크를 보여준다. */
+  /** 출발·도착 터미널 좌표를 찾아 네이버지도 대중교통 길찾기 링크를 보여준다. 늦게 온 앞 구간의 결과는 버린다. */
   const linkTokens = new Map<HTMLElement, number>();
-  const renderNaverLink = (wrap: HTMLElement, from: FareRegion | null, to: FareRegion | null, short = false): void => {
+  const renderNaverLink = (wrap: HTMLElement, from: FareRegion | null, to: FareRegion | null): void => {
     const token = (linkTokens.get(wrap) ?? 0) + 1;
     linkTokens.set(wrap, token);
     if (!isPlaceLookupEnabled() || !from || !to || sameRegion(from, to)) return;
@@ -1010,7 +1035,7 @@ function setupBusFareSuggestions(): void {
       link.href = naverTransitUrl(start, goal);
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
-      link.textContent = short ? '네이버지도에서 확인 ↗' : '네이버지도에서 시외버스 요금 확인 ↗';
+      link.textContent = '네이버지도에서 요금 확인 ↗';
       link.title = `${start.name} → ${goal.name} 대중교통 길찾기. 시외버스 최소요금을 확인해 금액에 입력하세요.`;
       wrap.querySelectorAll('a').forEach((old) => old.remove());
       wrap.appendChild(link);
@@ -1064,6 +1089,41 @@ function setupBusFareSuggestions(): void {
   }
   syncBusFares = sync;
   sync();
+}
+
+/**
+ * 미리보기 운임 금액 팝오버에 사이드패널과 같은 요금 칩(요금표·공식 운임·동명 지역 바꾸기·네이버지도)을 보여 준다.
+ * 사이드패널의 칩 줄을 그대로 비춰 그리므로, 실시간 조회 결과나 바꾸기로 칩이 바뀌면 팝오버도 따라 바뀐다.
+ * 금액 칩은 사이드패널 칩을 누른 것과 같게 반영하고 팝오버를 닫는다.
+ */
+function fareSuggestionExtras(key: string, ctx: PopoverExtrasContext): { el: HTMLElement; cleanup: () => void } | null {
+  const direction = key.endsWith('금액') ? key.slice(0, -2) : '';
+  const wrap = direction ? formEl.querySelector<HTMLElement>(`[data-fare-suggestions="${direction}"]`) : null;
+  const amount = formEl.elements.namedItem(key);
+  if (!wrap || !(amount instanceof HTMLInputElement)) return null;
+  const el = document.createElement('div');
+  el.className = 'field-popover__fare-chips';
+  let lastAmount = amount.value;
+  const mirror = (chip: Element): Element => {
+    const copy = chip.cloneNode(true) as HTMLElement;
+    if (!(chip instanceof HTMLButtonElement)) return copy; // 네이버지도 링크는 그대로 연다
+    copy.addEventListener('click', () => {
+      chip.click();
+      if (chip.dataset.amount !== undefined) ctx.pick(chip.dataset.amount);
+    });
+    return copy;
+  };
+  const render = (): void => {
+    el.replaceChildren(...[...wrap.children].map(mirror));
+    el.hidden = el.childElementCount === 0;
+    // 바꾸기 칩 등으로 금액이 다시 자동 입력되면, 손대지 않은 입력칸도 따라 바꾼다
+    if (amount.value !== lastAmount && ctx.getValue() === lastAmount) ctx.setValue(amount.value);
+    lastAmount = amount.value;
+  };
+  const observer = new MutationObserver(render);
+  observer.observe(wrap, { childList: true, subtree: true, attributes: true });
+  render();
+  return { el, cleanup: () => observer.disconnect() };
 }
 
 function setupReturnLocationDefaults(): void {
@@ -1632,6 +1692,7 @@ async function initialize(): Promise<void> {
       },
       getValue: (key) => getFormFieldValue(key),
       getSuggestions: (key) => (key === '등급' ? { label: '등급', values: [...GRADE_OPTIONS] } : getPassengerOrgSuggestion(key)),
+      getExtras: fareSuggestionExtras,
       commit: (key, value) => {
         if (!setFormFieldValue(key, value)) return;
         setStatus(value ? `"${value}" 을(를) 반영했습니다.` : '해당 칸을 비웠습니다.');
@@ -1657,6 +1718,7 @@ async function initialize(): Promise<void> {
         });
       },
     },
+    onReveal: revealFormControl,
     onAfterEdit: (label, value) => {
       syncFormFromInline(label, value);
       if (label === '성명' || label === '이름') scheduleAutomaticStamp();

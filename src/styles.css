@@ -713,6 +713,16 @@ html, body {
   color: #374151;
   margin-bottom: 6px;
 }
+/* 운임 금액 팝오버의 요금 칩 — 사이드패널 칩 줄을 비춘 것. 칩 문구가 길어 폭을 제한해 줄바꿈시킨다. */
+.field-popover__fare-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 340px;
+  margin-top: 8px;
+}
+.field-popover__fare-chips[hidden] { display: none; }
+.field-popover__fare-chips .attachment-preset-chip { padding: 4px 10px; font-size: 11px; }
 .field-popover__recent {
   display: flex;
   flex-wrap: wrap;

@@ -23,6 +23,7 @@ import {
   showFareRowPopover,
   showFieldPopover,
   type FareDirection,
+  type PopoverExtrasContext,
 } from './field-popover';
 import { getRecentValues, pushRecentValue } from './recent-values';
 
@@ -44,6 +45,11 @@ export interface InlineEditDeps {
   /** 편집 적용 직후 호출 — 미리보기 갱신·필드 재스캔·폼 동기화 등 */
   onAfterEdit: (label: string, value: string) => void;
   /**
+   * 미리보기에서 칸을 눌러 팝오버를 열 때 — 사이드패널에서 그 칸의 폼 입력이 든 탭을 보여 준다.
+   * name 은 폼 입력 이름 (누름틀 라벨·셀 키). 운임 행 메뉴는 '갈때금액', 도장은 '성명'.
+   */
+  onReveal?: (name: string) => void;
+  /**
    * 누름틀이 아닌 일반 표 칸(식비·동승자) 과 운임 행 삭제/복원.
    * 값의 단일 출처는 사이드패널 폼이라, 여기서는 폼 값을 읽고 쓰는 콜백만 받는다.
    */
@@ -54,6 +60,8 @@ export interface InlineEditDeps {
     getValue: (key: string) => string;
     /** 한 번 클릭으로 넣을 제안 값 (동승자 소속 ← 신청인 소속 등). 없으면 표시하지 않는다. */
     getSuggestions?: (key: string) => { label: string; values: string[] } | null;
+    /** 입력칸 아래에 붙일 부가 영역 (운임 금액의 요금 칩 등). 없으면 null */
+    getExtras?: (key: string, ctx: PopoverExtrasContext) => { el: HTMLElement; cleanup?: () => void } | null;
     /** 셀 값 반영 — 빈 문자열이면 칸을 비운다 */
     commit: (key: string, value: string) => void;
     /** 운임 행의 현재 삭제 상태 */
@@ -130,7 +138,7 @@ interface FieldLocationPathEntry {
 }
 
 export function attachInlineEditing(deps: InlineEditDeps): InlineEditHandle {
-  const { wasm, canvasView, container, getFields, onAfterEdit, stamp, cells } = deps;
+  const { wasm, canvasView, container, getFields, onAfterEdit, onReveal, stamp, cells } = deps;
   const scrollContent = container.querySelector<HTMLElement>('#scroll-content');
   if (!scrollContent) {
     return {
@@ -166,6 +174,7 @@ export function attachInlineEditing(deps: InlineEditDeps): InlineEditHandle {
         e.preventDefault();
         e.stopPropagation();
         hideHighlight();
+        onReveal?.(hit.label);
         openPopoverFor(hit, anchor);
         return;
       }
@@ -173,12 +182,14 @@ export function attachInlineEditing(deps: InlineEditDeps): InlineEditHandle {
       e.preventDefault();
       e.stopPropagation();
       hideHighlight();
+      onReveal?.(spot.region.kind === 'fare' ? '갈때금액' : spot.region.key);
       openCellPopoverFor(spot.region, anchor);
       return;
     } else if (spot?.kind === 'stamp' && stamp) {
       e.preventDefault();
       e.stopPropagation();
       hideHighlight();
+      onReveal?.('성명');
       stamp.onOpen(anchor);
       return;
     }
@@ -189,6 +200,7 @@ export function attachInlineEditing(deps: InlineEditDeps): InlineEditHandle {
       e.preventDefault();
       e.stopPropagation();
       hideHighlight();
+      onReveal?.(hit.label);
       openPopoverFor(hit, anchor);
     }
   };
@@ -328,6 +340,7 @@ export function attachInlineEditing(deps: InlineEditDeps): InlineEditHandle {
       placeholder: region.placeholder,
       initialValue: cells.getValue(region.key),
       suggestions: cells.getSuggestions?.(region.key) ?? undefined,
+      extras: cells.getExtras ? (ctx) => cells.getExtras!(region.key, ctx) : undefined,
       anchor,
       onConfirm: (raw) => cells.commit(region.key, raw.trim()),
       onCancel: () => undefined,

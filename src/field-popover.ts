@@ -38,9 +38,21 @@ export interface PopoverArgs {
    * 최근 입력 칩과 같은 모양이고, 앞쪽에 다른 이름표를 달아 구분한다.
    */
   suggestions?: { label: string; values: string[] };
+  /**
+   * 입력칸 아래에 붙일 부가 영역 (운임 금액의 요금 칩 등). 팝오버가 닫힐 때 cleanup 을 부른다.
+   * ctx.pick 은 값을 넣고 곧장 확정, ctx.setValue 는 입력칸 값만 바꾼다.
+   */
+  extras?: (ctx: PopoverExtrasContext) => { el: HTMLElement; cleanup?: () => void } | null;
   onConfirm: (value: string) => void;
   onCancel: () => void;
   onNext?: (value: string) => void;
+}
+
+export interface PopoverExtrasContext {
+  /** 지금 입력칸의 값 */
+  getValue: () => string;
+  setValue: (raw: string) => void;
+  pick: (raw: string) => void;
 }
 
 export interface FareRowPopoverArgs {
@@ -140,6 +152,13 @@ export function showFieldPopover(args: PopoverArgs): void {
 
   root.appendChild(input);
 
+  const extras = args.extras?.({
+    getValue: () => getInputValue(input),
+    setValue: (raw) => fillInputValue(input, cfg, raw),
+    pick: pickChip,
+  }) ?? null;
+  if (extras) root.appendChild(extras.el);
+
   const buttons = document.createElement('div');
   buttons.className = 'field-popover__buttons';
   const cancelBtn = document.createElement('button');
@@ -211,7 +230,10 @@ export function showFieldPopover(args: PopoverArgs): void {
     if (!root.contains(e.target as Node)) finish('cancel');
   };
   setTimeout(() => document.addEventListener('mousedown', onOuter, { capture: true }), 0);
-  currentCleanup = () => document.removeEventListener('mousedown', onOuter, { capture: true } as any);
+  currentCleanup = () => {
+    document.removeEventListener('mousedown', onOuter, { capture: true } as any);
+    extras?.cleanup?.();
+  };
 
   // 자동 포커스 (텍스트 인풋은 전체 선택까지)
   setTimeout(() => {
