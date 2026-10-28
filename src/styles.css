@@ -307,8 +307,27 @@ html, body {
   border-color: #1d4ed8;
   color: #ffffff;
 }
-.attachment-preset-chip.is-active::before {
-  content: "✓ ";
+/* 체크 표시는 칩 모서리 배지로 — 글자 앞에 붙이면 칩 폭이 바뀌어 한 줄의 칩들이 누를 때마다 밀린다. */
+.attachment-preset-chip.is-active {
+  position: relative;
+}
+.attachment-preset-chip.is-active::after {
+  content: "✓";
+  position: absolute;
+  top: -6px;
+  right: -4px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid #ffffff;
+  background: #1d4ed8;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 11px;
+  text-align: center;
+  box-sizing: border-box;
+  pointer-events: none;
 }
 .form-pane input,
 .form-pane select,
