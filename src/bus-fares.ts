@@ -157,6 +157,16 @@ export function sortOfficialFares(fares: readonly OfficialFare[]): OfficialFare[
   return fares.filter((f) => !/심야|주말/.test(f.등급)).sort((x, y) => gradeRank(x.등급) - gradeRank(y.등급) || x.요금 - y.요금);
 }
 
+/** 여러 터미널 쌍에서 받은 요금을 등급별 최저 요금 하나씩으로 합친다 (그 요금의 출발·도착 터미널을 그대로 둔다). */
+export function mergeOfficialFares(lists: readonly (readonly OfficialFare[])[]): OfficialFare[] {
+  const byGrade = new Map<string, OfficialFare>();
+  for (const fare of lists.flat()) {
+    const best = byGrade.get(fare.등급);
+    if (!best || fare.요금 < best.요금) byGrade.set(fare.등급, fare);
+  }
+  return sortOfficialFares([...byGrade.values()]);
+}
+
 /** TAGO 배차 목록(charge·gradeNm)을 등급별 최저 요금으로 묶는다. */
 export function summarizeFareRows(
   rows: readonly { charge?: unknown; gradeNm?: unknown }[],

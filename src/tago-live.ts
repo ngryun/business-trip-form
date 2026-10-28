@@ -1,6 +1,6 @@
 import terminalsJson from './data/tago-terminals.json';
 import expressTerminalsJson from './data/tago-express-terminals.json';
-import { summarizeFareRows, type OfficialFare } from './bus-fares';
+import { mergeOfficialFares, summarizeFareRows, type OfficialFare } from './bus-fares';
 import { expressTerminalsForRegion, terminalsForRegion, type FareRegion, type TagoTerminal } from './fare-region';
 
 /**
@@ -21,7 +21,7 @@ const EXPRESS_TERMINALS = expressTerminalsJson as TagoTerminal[];
 /** 한 번 찾을 때 조회할 터미널 수 (출발·도착 각각) — 큰 도시는 터미널이 여럿이라 앞쪽(주 터미널)만 본다.
  *  직행이 없는 구간은 모든 쌍을 다 부르게 되므로, 하루 호출 한도를 생각해 작게 둔다 (최대 2×2 + 반대 방향 1). */
 const TERMINALS_PER_END = 2;
-/** 고속버스는 같은 이름의 터미널 id 가 여럿이라 쌍이 많다 — 최대 이만큼만 조회하고, 한 번에 이만큼씩 부른다 (초당 호출 제한). */
+/** 고속버스는 같은 이름의 터미널 id 가 여럿이라 쌍이 많다 — 최대 이만큼(모두 조회)만, 한 번에 이만큼씩 부른다 (초당 호출 제한). */
 const EXPRESS_MAX_PAIRS = 24;
 const EXPRESS_BATCH = 3;
 const TIMEOUT_MS = 5000;
@@ -105,23 +105,26 @@ async function findSuburbsFares(from: FareRegion, to: FareRegion): Promise<Offic
 }
 
 /**
- * 고속버스: 노선마다 터미널 id 가 달라 쌍을 여러 개 불러야 한다. 몇 쌍씩 함께 불러 앞 순서에서 요금이 나온 첫 쌍을 쓴다.
- * 일부 쌍만 실패하고 요금이 없으면 예외 — 다음에 다시 조회하게 한다.
+ * 고속버스: 노선마다 터미널 id 가 달라 쌍을 여러 개 불러야 한다. 같은 구간도 터미널마다 등급·요금이 달라
+ * (서울경부→양양 고속 16,700, 동서울→양양 우등 20,100) 모든 쌍을 몇 쌍씩 불러 등급별 최저 요금으로 합친다.
+ * 요금이 하나도 없는데 일부 쌍이 실패했으면 예외 — 다음에 다시 조회하게 한다.
  */
 async function findExpressFares(from: FareRegion, to: FareRegion): Promise<OfficialFare[]> {
   const deps = expressTerminalsForRegion(from, EXPRESS_TERMINALS);
   const arrs = expressTerminalsForRegion(to, EXPRESS_TERMINALS);
   const pairs = deps.flatMap((dep) => arrs.map((arr) => [dep, arr] as const)).slice(0, EXPRESS_MAX_PAIRS);
+  const found: OfficialFare[][] = [];
   let failure: unknown = null;
   for (let i = 0; i < pairs.length; i += EXPRESS_BATCH) {
     const results = await Promise.allSettled(pairs.slice(i, i + EXPRESS_BATCH).map(([dep, arr]) => fetchPair(EXPRESS, dep, arr)));
     for (const result of results) {
-      if (result.status === 'fulfilled' && result.value.length) return result.value;
-      if (result.status === 'rejected') failure ??= result.reason;
+      if (result.status === 'fulfilled') found.push(result.value);
+      else failure ??= result.reason;
     }
   }
-  if (failure) throw failure;
-  return [];
+  const fares = mergeOfficialFares(found);
+  if (fares.length === 0 && failure) throw failure;
+  return fares;
 }
 
 /**

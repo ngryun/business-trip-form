@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { findOfficialFares, summarizeFareRows } from '../src/bus-fares.ts';
+import { findOfficialFares, mergeOfficialFares, summarizeFareRows } from '../src/bus-fares.ts';
 
 const sample = {
   조회일: '2026-10-27',
@@ -57,4 +57,14 @@ test('고속버스 등급: 고속(일반) → 우등 → 프리미엄, 심야는
   const r = summarizeFareRows(rows, { 출발: '서울경부', 도착: '동대구', 실시간: true, 고속: true });
   assert.deepEqual(r.map((f) => [f.등급, f.요금]), [['고속', 22100], ['우등', 32700], ['프리미엄', 34000]]);
   assert.equal(r[0].고속, true);
+});
+
+test('여러 터미널 쌍의 요금은 등급별 최저로 합치고, 그 요금의 터미널을 남긴다', () => {
+  const r = mergeOfficialFares([
+    [{ 출발: '동서울', 도착: '양양', 등급: '우등', 요금: 20100 }, { 출발: '동서울', 도착: '양양', 등급: '프리미엄', 요금: 26100 }],
+    [],
+    [{ 출발: '서울경부', 도착: '양양', 등급: '고속', 요금: 16700 }, { 출발: '서울경부', 도착: '양양', 등급: '우등', 요금: 21700 }],
+  ]);
+  assert.deepEqual(r.map((f) => [f.출발, f.등급, f.요금]), [['서울경부', '고속', 16700], ['동서울', '우등', 20100], ['동서울', '프리미엄', 26100]]);
+  assert.deepEqual(mergeOfficialFares([[], []]), []);
 });
