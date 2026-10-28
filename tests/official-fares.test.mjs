@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { findOfficialFares, mergeOfficialFares, summarizeFareRows } from '../src/bus-fares.ts';
+import { findOfficialFares, findStopoverFares, mergeOfficialFares, summarizeFareRows } from '../src/bus-fares.ts';
 
 const sample = {
   조회일: '2026-10-27',
@@ -67,4 +67,24 @@ test('여러 터미널 쌍의 요금은 등급별 최저로 합치고, 그 요�
   ]);
   assert.deepEqual(r.map((f) => [f.출발, f.등급, f.요금]), [['서울경부', '고속', 16700], ['동서울', '우등', 20100], ['동서울', '프리미엄', 26100]]);
   assert.deepEqual(mergeOfficialFares([[], []]), []);
+});
+
+const stopovers = {
+  구간: [
+    { 출발: '강원 양양', 도착: '강원 춘천', 등급: '우등', 요금: 13400, 노선: '속초→춘천 노선 양양 정차', 출처: '시간표', 확인일: '2026-10-29' },
+    { 출발: '경남 고성', 도착: '경남 진주', 등급: '일반', 요금: 5000, 출처: '시간표', 확인일: '2026-10-29' },
+  ],
+};
+
+test('경유 구간 보완 요금표: 양방향으로 찾고 출처를 붙인다', () => {
+  const r = findStopoverFares('양양', '춘천', stopovers);
+  assert.deepEqual(r.map((f) => [f.등급, f.요금, f.조회일]), [['우등', 13400, '2026-10-29']]);
+  assert.equal(r[0].보완?.노선, '속초→춘천 노선 양양 정차');
+  assert.equal(findStopoverFares('춘천', '양양', stopovers)[0]?.요금, 13400);
+  assert.deepEqual(findStopoverFares('양양', '속초', stopovers), []);
+});
+
+test('경유 구간 보완 요금표도 동명 지역의 시도를 가린다', () => {
+  assert.equal(findStopoverFares('고성', '진주', stopovers)[0]?.요금, 5000);
+  assert.deepEqual(findStopoverFares('강원 고성', '진주', stopovers), []);
 });

@@ -9,6 +9,7 @@
 
 import {
   normalizeFareCity,
+  parseFareRegion,
   resolveFareRegion,
   resolveFareRoute,
   sameNameProvinces,
@@ -139,6 +140,8 @@ export interface OfficialFare {
   실시간?: boolean;
   /** 시외버스에 없어 TAGO 고속버스정보에서 찾은 값이면 true (등급 "고속" 은 일반 고속버스) */
   고속?: boolean;
+  /** TAGO 가 아니라 경유 구간 보완 요금표(관리자 입력)에서 온 값이면 그 노선·출처 */
+  보완?: { 노선?: string; 출처: string };
 }
 
 export interface OfficialFareData {
@@ -193,4 +196,44 @@ export function findOfficialFares(from: FareEnd, to: FareEnd, source: OfficialFa
     source.구간.filter((f) => terminalMatches(dep, f.출발) && terminalMatches(arr, f.도착, f.도착시도));
   const forward = match(a, b);
   return sortOfficialFares(forward.length ? forward : match(b, a));
+}
+
+/* ── 경유 구간 보완 요금표 (src/data/stopover-fares.json, 관리자가 채움) ──
+ * TAGO 는 노선의 출발·도착 터미널 요금만 주므로, 다른 터미널에서 출발한 버스가 중간에 서는 구간
+ * (속초→춘천 노선을 양양에서 타는 경우 등)은 실시간 조회로도 찾지 못한다. 자주 쓰는 구간만 시간표에서 확인해 적어 둔다. */
+
+export interface StopoverFareEntry {
+  /** "강원 양양" 처럼 시도를 붙여 쓴다 */
+  출발: string;
+  도착: string;
+  등급: string;
+  요금: number;
+  /** 어느 노선이 서는지 (예: "속초→춘천 노선 양양 정차") */
+  노선?: string;
+  출처: string;
+  /** 확인한 날 (YYYY-MM-DD) */
+  확인일: string;
+}
+
+export interface StopoverFareData {
+  구간: StopoverFareEntry[];
+}
+
+/** 출발지→도착지의 경유 구간 보완 요금 (반대 방향도 같은 요금). 공식 운임 칩과 같은 꼴로 돌려준다. */
+export function findStopoverFares(from: FareEnd, to: FareEnd, source: StopoverFareData): OfficialFare[] {
+  const [a, b] = routeOf(from, to);
+  if (!a || !b || sameRegion(a, b)) return [];
+  const hits = source.구간.filter((entry) => {
+    const dep = parseFareRegion(entry.출발);
+    const arr = parseFareRegion(entry.도착);
+    return (sameRegion(dep, a) && sameRegion(arr, b)) || (sameRegion(dep, b) && sameRegion(arr, a));
+  });
+  return sortOfficialFares(hits.map((entry) => ({
+    출발: entry.출발,
+    도착: entry.도착,
+    등급: entry.등급,
+    요금: entry.요금,
+    조회일: entry.확인일,
+    보완: { 노선: entry.노선, 출처: entry.출처 },
+  })));
 }

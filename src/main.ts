@@ -4,11 +4,13 @@ import { getCellRegions, invalidateCellRegions } from './cell-fields';
 import { fetchTemplateBytes, loadTemplate } from './template-loader';
 import { TEMPLATE_FILES, templateKindFor, type TemplateKind } from './template-kind';
 import { applyTripNameLine } from './trip-name';
-import { BUS_FARE_TABLE_DATE, busFareLabel, findBusFares, findOfficialFares, formatWon, type BusFare, type OfficialFare, type OfficialFareData } from './bus-fares';
+import { BUS_FARE_TABLE_DATE, busFareLabel, findBusFares, findOfficialFares, findStopoverFares, formatWon, type BusFare, type OfficialFare, type OfficialFareData, type StopoverFareData } from './bus-fares';
 import { alternativeRegions, regionLabel, resolveFareRoute, sameNameProvinces, sameRegion, type FareRegion, type ResolvedRegion } from './fare-region';
 import { fetchLiveFares, isLiveFareEnabled } from './tago-live';
 import tagoFaresJson from './data/tago-fares.json';
+import stopoverFaresJson from './data/stopover-fares.json';
 const OFFICIAL_FARES = tagoFaresJson as OfficialFareData;
+const STOPOVER_FARES = stopoverFaresJson as StopoverFareData;
 import { discoverFields, fillDateTimeRange, removeDateTimeRangeSeparator, setFieldValues, setSuppressedFareGuideLabels, type FieldMap } from './field-filler';
 import { downloadHwp } from './download';
 import { mountPreview, refreshPreview, reloadPreservingScroll, setPreviewReloadHook } from './preview';
@@ -937,11 +939,13 @@ function setupBusFareSuggestions(): void {
     btn.dataset.official = '';
     // 고속버스 등급 "고속" 은 일반 고속버스라 칩에는 "고속버스 일반" 으로 쓴다.
     const grade = fare.고속 ? `고속버스 ${fare.등급 === '고속' ? '일반' : fare.등급}` : fare.등급;
-    btn.textContent = `공식 운임 ${grade} ${value}${differs ? ' · 요금표와 다름' : ''}`;
+    btn.textContent = `${fare.보완 ? '보완 운임' : '공식 운임'} ${grade} ${value}${differs ? ' · 요금표와 다름' : ''}`;
     const info = fare.고속 ? '고속버스정보' : '시외버스정보';
-    const source = fare.실시간
-      ? `국토교통부 ${info}(TAGO) 실시간 조회 · ${fare.조회일} 배차 기준`
-      : `국토교통부 ${info}(TAGO) ${fare.조회일 ?? OFFICIAL_FARES.조회일} 조회`;
+    const source = fare.보완
+      ? `경유 구간 보완 요금표(관리자 입력) · ${fare.보완.출처} ${fare.조회일} 확인${fare.보완.노선 ? ` · ${fare.보완.노선}` : ''}`
+      : fare.실시간
+        ? `국토교통부 ${info}(TAGO) 실시간 조회 · ${fare.조회일} 배차 기준`
+        : `국토교통부 ${info}(TAGO) ${fare.조회일 ?? OFFICIAL_FARES.조회일} 조회`;
     btn.title = `${source} · ${fare.출발}→${fare.도착} ${grade} ${value}원${differs ? '. 교육지원청 요금표와 금액이 다르니 어느 쪽을 쓸지 확인하세요.' : ''}`;
     btn.setAttribute('aria-pressed', 'false');
     btn.addEventListener('click', () => { setAmount(amount, value); markPressed(wrap, amount); });
@@ -980,7 +984,9 @@ function setupBusFareSuggestions(): void {
       const toHint = regionHintFor(toName, to);
       const route = resolveFareRoute(from, to, { from: fromHint?.region, to: toHint?.region });
       const fares = findBusFares(route.from, route.to);
-      const official = findOfficialFares(route.from, route.to, OFFICIAL_FARES);
+      // TAGO 에 없는 경유 구간(중간 정차)은 관리자가 채운 보완 요금표로 메운다.
+      const tagoFares = findOfficialFares(route.from, route.to, OFFICIAL_FARES);
+      const official = tagoFares.length ? tagoFares : findStopoverFares(route.from, route.to, STOPOVER_FARES);
       const previousAuto = autoBusFares.get(amount.name);
       const untouched = isUntouched(amount);
       wrap.replaceChildren();
@@ -1045,7 +1051,7 @@ function setupBusFareSuggestions(): void {
   /**
    * 실시간 공식 운임: 입력이 멈추면 TAGO 를 조회해 내장 자료의 공식 운임 칩을 오늘 배차 기준 값으로 바꾼다.
    * 요금표 구간이면 금액이 다를 때만 경고 칩, 요금표에 없는 구간이면 금액도 자동으로 채운다. 실패하면 내장 자료를 그대로 둔다.
-   * 요금표에 없는 구간은 조회하는 동안 "실시간 운임 조회 중…", 시외·고속버스 모두 직행 배차가 없으면 "직행 노선 정보 없음" 을 보여 준다.
+   * 요금표에 없는 구간은 조회하는 동안 "실시간 운임 조회 중…", 시외·고속버스 모두 배차가 없고 보완 요금표에도 없으면 "운임 정보 없음" 을 보여 준다 (경유 구간일 수 있다).
    */
   const liveTokens = new Map<HTMLElement, number>();
   const liveTimers = new Map<HTMLElement, number>();
@@ -1078,9 +1084,9 @@ function setupBusFareSuggestions(): void {
     const apply = (live: OfficialFare[]): void => {
       wrap.querySelectorAll('[data-live-status]').forEach((el) => el.remove());
       if (live.length === 0) {
-        // 요금표·내장 자료에도 없는 구간이면, 실시간 조회로도 못 찾았다고 알려 준다.
+        // 요금표·내장 자료·보완 요금표에도 없는 구간이면, 실시간 조회로도 못 찾았다고 알려 준다.
         if (tableFares.length === 0 && !wrap.querySelector('[data-official]')) {
-          liveStatus(wrap, '직행 노선 정보 없음', `국토교통부 시외버스·고속버스정보(TAGO)에 ${regionLabel(from)}→${regionLabel(to)} 직행 배차가 없습니다. 갈아타는 구간은 네이버지도 등에서 요금을 확인해 입력하세요.`);
+          liveStatus(wrap, '운임 정보 없음 · 경유 구간은 TAGO에 없을 수 있음', `국토교통부 시외버스·고속버스정보(TAGO)에 ${regionLabel(from)}→${regionLabel(to)} 배차 자료가 없습니다. TAGO 는 노선의 출발·도착 터미널 요금만 있어, 다른 곳에서 출발한 버스가 중간에 서는 경유 구간이나 갈아타는 구간은 빠져 있습니다. 네이버지도·터미널 시간표에서 요금을 확인해 입력하세요.`);
         }
         return;
       }
