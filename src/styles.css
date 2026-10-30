@@ -460,6 +460,34 @@ html, body {
   font-size: 13px;
   cursor: pointer;
 }
+.stamp-dialog__texture {
+  margin: 4px 0 2px;
+  padding-top: 8px;
+  border-top: 1px solid #f3f4f6;
+}
+.stamp-dialog__texture .stamp-dialog__field { margin-bottom: 6px; }
+.stamp-dialog__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.stamp-dialog__slider {
+  display: grid;
+  grid-template-columns: 96px 1fr 28px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #374151;
+}
+.stamp-dialog__slider input { width: 100%; accent-color: #b3272d; }
+.stamp-dialog__slider output { text-align: right; color: #6b7280; font-variant-numeric: tabular-nums; }
+.stamp-dialog__note {
+  margin: 0 0 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #6b7280;
+}
 .stamp-dialog__preview {
   display: flex;
   justify-content: center;
