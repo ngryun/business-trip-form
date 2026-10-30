@@ -1530,6 +1530,10 @@ async function initialize(): Promise<void> {
   // 3) 미리보기 캔버스 마운트
   const canvasView = mountPreview(previewContainer, wasm);
   const signatureStamp = new SignatureStampManager(wasm);
+  // 성명으로 만든 자동 도장 상태 — 도장 표시(updateSignatureButtons)가 읽으므로 그보다 먼저 둔다.
+  let automaticStampTimer = 0;
+  let automaticStampVersion = 0;
+  let automaticStampDataUrl: string | null = null;
   updateSignatureButtons();
   // refreshPreview 가 문서를 export→reload 하면 도장 배치(글 뒤로)가 풀리므로, 위치는 그대로
   // 두고 본문배치만 다시 적용한다. (realign 은 reload 직후 좌표가 틀어져 위치가 어긋난다.)
@@ -1639,10 +1643,6 @@ async function initialize(): Promise<void> {
       setStatus('저장된 도장/서명 이미지를 불러오지 못해 저장본을 삭제했습니다.', true);
     }
   }
-
-  let automaticStampTimer = 0;
-  let automaticStampVersion = 0;
-  let automaticStampDataUrl: string | null = null;
 
   function cancelAutomaticStamp(): void {
     window.clearTimeout(automaticStampTimer);
@@ -1794,6 +1794,15 @@ async function initialize(): Promise<void> {
   });
 
   // 5) 액션 버튼 바인딩
+  /** 지금 문서의 도장을 브라우저에 저장한다. 실패하면 이유를 돌려준다 (문서에는 그대로 들어가 있다). */
+  function persistCurrentSignature(): string | null {
+    const stored = signatureStamp.getStoredStamp();
+    if (!stored) return null;
+    const result = saveStoredSignatureStamp(stored);
+    return result.ok ? null : result.reason;
+  }
+
+  /** 이미지를 넣거나 만든 도장은 다음 방문에도 쓰도록 바로 브라우저에 저장한다. */
   async function applySignatureFile(
     file: File,
     successMessage: string,
@@ -1802,9 +1811,11 @@ async function initialize(): Promise<void> {
     cancelAutomaticStamp();
     try {
       await signatureStamp.applyFile(file, undefined, options);
+      const saveError = persistCurrentSignature();
       refreshPreviewAndRealignSignatureStamp();
       updateSignatureButtons();
-      setStatus(successMessage);
+      if (saveError) setStatus(`${successMessage} 다만 ${saveError}`, true);
+      else setStatus(`${successMessage} 브라우저에도 저장해 다음에도 씁니다.`);
     } catch (err) {
       console.error(err);
       if (signatureInput) signatureInput.value = '';
@@ -1816,7 +1827,7 @@ async function initialize(): Promise<void> {
   signatureInput?.addEventListener('change', async () => {
     const file = signatureInput.files?.[0];
     if (!file) return;
-    await applySignatureFile(file, '도장/서명 이미지를 성명 옆 (인)에 넣었습니다. 계속 쓰려면 브라우저 저장을 누르세요.');
+    await applySignatureFile(file, '도장/서명 이미지를 성명 옆 (인)에 넣었습니다.');
   });
 
   /** 이름 → 막도장 생성기. 사이드패널 버튼과 미리보기 도장 메뉴가 공유한다. */
@@ -1827,7 +1838,7 @@ async function initialize(): Promise<void> {
     openStampGenerator({
       initialName: nameControl instanceof HTMLInputElement ? nameControl.value.trim() : '',
       onGenerate: (file) => {
-        void applySignatureFile(file, '만든 도장을 성명 옆 (인)에 넣었습니다. 계속 쓰려면 브라우저 저장을 누르세요.', { rotationDeg: DEFAULT_STAMP_ROTATION_DEG });
+        void applySignatureFile(file, '만든 도장을 성명 옆 (인)에 넣었습니다.', { rotationDeg: DEFAULT_STAMP_ROTATION_DEG });
       },
     });
   }
@@ -1839,11 +1850,14 @@ async function initialize(): Promise<void> {
       setStatus('도장 회전에 실패했습니다.', true);
       return false;
     }
+    // 성명으로 만든 자동 도장이 아니면 저장본도 새 기울기로 맞춘다.
+    const isAutomatic = automaticStampDataUrl !== null && signatureStamp.getStoredStamp()?.dataUrl === automaticStampDataUrl;
+    const saveError = isAutomatic ? null : persistCurrentSignature();
     refreshPreviewAndRealignSignatureStamp();
     updateSignatureButtons();
-    setStatus(deg === 0
-      ? '도장 회전을 원래대로(0°) 되돌렸습니다.'
-      : `도장을 ${deg}° 기울였습니다. 계속 쓰려면 브라우저 저장을 누르세요.`);
+    const message = deg === 0 ? '도장 회전을 원래대로(0°) 되돌렸습니다.' : `도장을 ${deg}° 기울였습니다.`;
+    if (saveError) setStatus(`${message} 다만 ${saveError}`, true);
+    else setStatus(isAutomatic ? `${message} 계속 쓰려면 브라우저 저장을 누르세요.` : message);
     return true;
   }
 
@@ -1945,9 +1959,12 @@ async function initialize(): Promise<void> {
     signatureCurrentRoot.hidden = false;
     signatureCurrentThumb.src = stamp.dataUrl;
     const savedInBrowser = hasStoredSignatureStamp();
-    signatureCurrentLabel.textContent = savedInBrowser
-      ? '브라우저 저장본 사용 중 — 새 이미지를 고르면 교체됩니다'
-      : '방금 업로드한 이미지 사용 중 — 다음 방문에도 쓰려면 "브라우저 저장"';
+    const isAutomatic = automaticStampDataUrl !== null && stamp.dataUrl === automaticStampDataUrl;
+    signatureCurrentLabel.textContent = isAutomatic
+      ? '성명으로 만든 기본 도장 사용 중 — 계속 쓰려면 "브라우저 저장"'
+      : savedInBrowser
+        ? '브라우저 저장본 사용 중 — 새 이미지를 넣거나 만들면 바꿔 저장합니다'
+        : '브라우저에 저장하지 못한 이미지 사용 중 — "브라우저 저장"을 다시 눌러 보세요';
   }
 
   // 모바일 전용 — 폼을 닫고 미리보기를 보여준다. 입력은 이미 자동 반영되어 있다.
