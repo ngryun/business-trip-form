@@ -1,5 +1,9 @@
 * { box-sizing: border-box; }
 
+/* rhwp 엔진(src/upstream/view/page-renderer.ts)이 글 뒤 그림(도장)이 있는 페이지의 흰 배경 층에 쓰는 색.
+   없으면 배경이 투명해져 곱하기(multiply)로 겹친 캔버스 너머로 미리보기 회색이 비쳐 종이가 어두워진다. */
+:root { --color-surface: #ffffff; }
+
 html, body {
   margin: 0;
   padding: 0;
