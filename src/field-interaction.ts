@@ -50,6 +50,15 @@ export interface InlineEditDeps {
    */
   onReveal?: (name: string) => void;
   /**
+   * 값의 출처가 사이드패널 폼인 누름틀 (첨부서류 — 여러 줄이 누름틀과 그 아래 문단에 나뉘어 들어간다).
+   * 팝오버를 폼 값으로 열고, 확인하면 누름틀 대신 폼에 넣는다. 미리보기 반영은 commit 쪽 몫.
+   */
+  formFields?: {
+    labels: ReadonlySet<string>;
+    getValue: (label: string) => string;
+    commit: (label: string, value: string) => void;
+  };
+  /**
    * 누름틀이 아닌 일반 표 칸(식비·동승자) 과 운임 행 삭제/복원.
    * 값의 단일 출처는 사이드패널 폼이라, 여기서는 폼 값을 읽고 쓰는 콜백만 받는다.
    */
@@ -138,7 +147,7 @@ interface FieldLocationPathEntry {
 }
 
 export function attachInlineEditing(deps: InlineEditDeps): InlineEditHandle {
-  const { wasm, canvasView, container, getFields, onAfterEdit, onReveal, stamp, cells } = deps;
+  const { wasm, canvasView, container, getFields, onAfterEdit, onReveal, formFields, stamp, cells } = deps;
   const scrollContent = container.querySelector<HTMLElement>('#scroll-content');
   if (!scrollContent) {
     return {
@@ -412,17 +421,27 @@ export function attachInlineEditing(deps: InlineEditDeps): InlineEditHandle {
     const entries = getFields().get(label) ?? [];
     const entry = entries.find((en) => en.fieldId === fieldId) ?? entries[0];
     const parsedInitial = parseFromHWP(label, entry?.value ?? '');
-    const initial = label === '제출날짜' && !parsedInitial ? todayDateValue() : parsedInitial;
+    const formOwned = formFields?.labels.has(label) ? formFields : null;
+    const initial = formOwned
+      ? formOwned.getValue(label)
+      : label === '제출날짜' && !parsedInitial ? todayDateValue() : parsedInitial;
+    const commit = (raw: string): void => {
+      if (!formOwned) {
+        commitSingleField(label, raw);
+        return;
+      }
+      if (!raw.trim()) return; // 누름틀 칸처럼 빈 값이면 취소처럼 동작
+      if (RECENT_TRACKED_LABELS.has(label)) pushRecentValue(label, raw);
+      formOwned.commit(label, raw);
+    };
     showFieldPopover({
       label,
       initialValue: initial,
       anchor,
       recentValues: RECENT_TRACKED_LABELS.has(label) ? getRecentValues(label) : undefined,
-      onConfirm: (raw) => {
-        commitSingleField(label, raw);
-      },
+      onConfirm: commit,
       onNext: (raw) => {
-        commitSingleField(label, raw);
+        commit(raw);
         openNextEmptyField(fieldId);
       },
       onCancel: () => undefined,

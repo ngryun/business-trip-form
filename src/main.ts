@@ -4,6 +4,7 @@ import { getCellRegions, invalidateCellRegions } from './cell-fields';
 import { fetchTemplateBytes, loadTemplate } from './template-loader';
 import { TEMPLATE_FILES, templateKindFor, type TemplateKind } from './template-kind';
 import { applyTripNameLine } from './trip-name';
+import { applyAttachmentLines, attachmentLines, ATTACHMENT_PRESETS, hasAttachmentItem, toggleAttachmentItem } from './attachments';
 import { BUS_FARE_TABLE_DATE, busFareLabel, findBusFares, findOfficialFares, findStopoverFares, formatWon, type BusFare, type OfficialFare, type OfficialFareData, type StopoverFareData } from './bus-fares';
 import { alternativeRegions, regionLabel, resolveFareRoute, sameNameProvinces, sameRegion, type FareRegion, type ResolvedRegion } from './fare-region';
 import { fetchLiveFares, isLiveFareEnabled } from './tago-live';
@@ -41,16 +42,13 @@ import {
   readUrlFormValues,
 } from './url-share';
 import {
-  ATTACHMENT_PRESETS,
   FIELD_CONFIGS,
   GRADE_OPTIONS,
   TRANSPORT_OPTIONS,
   formatDateKR,
   formatDateTimeRange,
-  hasListItem,
   parseDateKR,
   parseDateTimeRange,
-  toggleListItem,
 } from './field-config';
 
 /**
@@ -223,7 +221,8 @@ function collectFormValues(): Record<string, string> {
     올때출발지: raw.올때출발지 ?? '',
     올때도착지: raw.올때도착지 ?? '',
     제출날짜: formatDateKR(raw.제출날짜 ?? ''),
-    첨부서류: raw.첨부서류 ?? '',
+    // 누름틀에는 첫 줄만 — 둘째 줄부터는 applyAttachmentLines 가 누름틀 아래 문단에 넣는다
+    첨부서류: attachmentLines(raw.첨부서류 ?? '')[0] ?? '',
   };
 }
 
@@ -242,7 +241,7 @@ let syncAttachmentPresetChips: (() => void) | null = null;
 
 /**
  * 첨부서류 입력창 위의 "자주 쓰는 항목" 토글 칩.
- * 누르면 쉼표 목록에 추가, 다시 누르면 제거 — 들어있는 동안은 파랗게 표시된다.
+ * 누르면 새 줄로 추가, 다시 누르면 제거 — 들어있는 동안은 파랗게 표시된다.
  */
 function setupAttachmentPresets(): void {
   const wrap = document.getElementById('attachment-presets');
@@ -255,7 +254,7 @@ function setupAttachmentPresets(): void {
     btn.className = 'attachment-preset-chip';
     btn.textContent = preset;
     btn.addEventListener('click', () => {
-      textarea.value = toggleListItem(textarea.value, preset);
+      textarea.value = toggleAttachmentItem(textarea.value, preset);
       // input 이벤트로 미리보기 반영 + 임시저장까지 한 번에 태운다
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
       sync();
@@ -266,7 +265,7 @@ function setupAttachmentPresets(): void {
 
   const sync = (): void => {
     for (const { btn, preset } of chips) {
-      btn.classList.toggle('is-active', hasListItem(textarea.value, preset));
+      btn.classList.toggle('is-active', hasAttachmentItem(textarea.value, preset));
     }
   };
   textarea.addEventListener('input', sync);
@@ -1604,6 +1603,8 @@ async function initialize(): Promise<void> {
     });
     // 기본 양식: 출장지 셀 아래 줄에 [출장명 : …] 을 넣는다 (태백 양식은 출장명 누름틀을 쓰므로 줄을 비운다).
     applyTripNameLine(wasm, fields.get('출장지')?.[0]?.fieldId, templateKind === 'default' ? rawValues.출장명 ?? '' : '');
+    // 첨부서류가 여럿이면 누름틀(첫 줄) 아래에 한 줄씩 — 마지막 줄 끝에 "  끝."
+    applyAttachmentLines(wasm, fields.get('첨부서류')?.[0]?.fieldId, attachmentLines(rawValues.첨부서류 ?? ''));
     fillDateTimeRange(wasm, fields, rangeText, { clearEmpty: options.clearEmpty });
     refreshPreviewAndRealignSignatureStamp();
     fields = discoverFields(wasm);
@@ -1728,6 +1729,13 @@ async function initialize(): Promise<void> {
     canvasView,
     container: previewContainer,
     getFields: () => fields,
+    formFields: {
+      labels: new Set(['첨부서류']),
+      getValue: (label) => getFormFieldValue(label),
+      commit: (label, value) => {
+        if (setFormFieldValue(label, value)) setStatus(`"${label}" 항목을 반영했습니다.`);
+      },
+    },
     cells: {
       getRegions: () => {
         // "행 삭제"된 운임 행의 등급 칸은 비어 있으므로 편집 대상에서 뺀다

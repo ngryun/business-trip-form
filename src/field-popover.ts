@@ -12,13 +12,11 @@ import {
   getDateTimePickerController,
   getDateTimePickerValue,
 } from './datetime-picker';
+import { ATTACHMENT_PRESETS, hasAttachmentItem, toggleAttachmentItem } from './attachments';
 import {
-  ATTACHMENT_PRESETS,
   FIELD_CONFIGS,
   formatDateKR,
   formatDateTimeCompactKR,
-  hasListItem,
-  toggleListItem,
   type WidgetConfig,
 } from './field-config';
 
@@ -668,7 +666,7 @@ export function isPopoverOpen(): boolean {
   return currentPopover !== null;
 }
 
-/** 첨부서류 자주 쓰는 항목 토글 칩 줄 — textarea 값의 쉼표 목록에 추가/제거한다. */
+/** 첨부서류 자주 쓰는 항목 토글 칩 줄 — textarea 값(한 줄에 하나)에 추가/제거한다. */
 function buildAttachmentPresetRow(textarea: HTMLTextAreaElement): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'field-popover__recent attachment-presets';
@@ -684,7 +682,7 @@ function buildAttachmentPresetRow(textarea: HTMLTextAreaElement): HTMLElement {
     chip.textContent = preset;
     chip.addEventListener('click', (e) => {
       e.preventDefault();
-      textarea.value = toggleListItem(textarea.value, preset);
+      textarea.value = toggleAttachmentItem(textarea.value, preset);
       sync();
       textarea.focus();
     });
@@ -694,7 +692,7 @@ function buildAttachmentPresetRow(textarea: HTMLTextAreaElement): HTMLElement {
 
   const sync = (): void => {
     for (const { chip, preset } of chips) {
-      chip.classList.toggle('is-active', hasListItem(textarea.value, preset));
+      chip.classList.toggle('is-active', hasAttachmentItem(textarea.value, preset));
     }
   };
   textarea.addEventListener('input', sync);
