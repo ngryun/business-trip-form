@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { findOfficialFares, findStopoverFares, mergeOfficialFares, summarizeFareRows } from '../src/bus-fares.ts';
+import { busFareApplies, findOfficialFares, findStopoverFares, hasGrade, mergeOfficialFares, reverseOfficialFares, summarizeFareRows } from '../src/bus-fares.ts';
 
 const sample = {
   조회일: '2026-10-27',
@@ -87,4 +87,33 @@ test('경유 구간 보완 요금표: 양방향으로 찾고 출처를 붙인다
 test('경유 구간 보완 요금표도 동명 지역의 시도를 가린다', () => {
   assert.equal(findStopoverFares('고성', '진주', stopovers)[0]?.요금, 5000);
   assert.deepEqual(findStopoverFares('강원 고성', '진주', stopovers), []);
+});
+
+test('같은 등급에 요금이 여럿이면 최저를 요금으로, 가장 비싼 값을 최고로 둔다', () => {
+  const rows = [{ charge: 10800, gradeNm: '일반' }, { charge: 8400, gradeNm: '일반' }, { charge: 16700, gradeNm: '우등' }];
+  const r = summarizeFareRows(rows, { 출발: '속초', 도착: '강릉' });
+  assert.deepEqual(r.map((f) => [f.등급, f.요금, f.최고]), [['일반', 8400, 10800], ['우등', 16700, undefined]]);
+  assert.equal('최고' in r[1], false);
+});
+
+test('터미널 쌍을 합칠 때도 등급별로 가장 비싼 요금을 최고로 남긴다', () => {
+  const r = mergeOfficialFares([
+    [{ 출발: '동서울', 도착: '속초', 등급: '우등', 요금: 23000 }],
+    [{ 출발: '서울남부', 도착: '속초', 등급: '우등', 요금: 22500, 최고: 22800 }],
+  ]);
+  assert.deepEqual(r.map((f) => [f.출발, f.요금, f.최고]), [['서울남부', 22500, 23000]]);
+  assert.equal('최고' in mergeOfficialFares([[{ 출발: 'a', 도착: 'b', 등급: '일반', 요금: 100 }]])[0], false);
+});
+
+test('반대 방향 자료는 출발·도착을 뒤집고 역방향 표시를 붙인다', () => {
+  const r = reverseOfficialFares([{ 출발: '속초', 도착: '춘천', 도착시도: '강원', 등급: '우등', 요금: 16700, 실시간: true }], '강원');
+  assert.deepEqual(r, [{ 출발: '춘천', 도착: '속초', 도착시도: '강원', 등급: '우등', 요금: 16700, 실시간: true, 역방향: true }]);
+  assert.equal('도착시도' in reverseOfficialFares([{ 출발: 'a', 도착: 'b', 도착시도: '경기', 등급: '일반', 요금: 1 }])[0], false);
+});
+
+test('일반 등급 유무, 교통편에 따른 버스 운임 자동 입력 여부', () => {
+  assert.equal(hasGrade([{ 출발: 'a', 도착: 'b', 등급: '우등', 요금: 1 }], '일반'), false);
+  assert.equal(hasGrade([{ 출발: 'a', 도착: 'b', 등급: '일반', 요금: 1 }], '일반'), true);
+  for (const t of ['', '버스', '시외버스', '자가용', '관용차']) assert.equal(busFareApplies(t), true, t);
+  for (const t of ['기차/KTX', '항공', '지하철', '택시', 'KTX']) assert.equal(busFareApplies(t), false, t);
 });

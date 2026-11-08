@@ -5,9 +5,9 @@ import { fetchTemplateBytes, loadTemplate } from './template-loader';
 import { TEMPLATE_FILES, templateKindFor, type TemplateKind } from './template-kind';
 import { applyTripNameLine } from './trip-name';
 import { applyAttachmentLines, attachmentLines, ATTACHMENT_PRESETS, hasAttachmentItem, toggleAttachmentItem } from './attachments';
-import { BUS_FARE_TABLE_DATE, busFareLabel, findBusFares, findOfficialFares, findStopoverFares, formatWon, type BusFare, type OfficialFare, type OfficialFareData, type StopoverFareData } from './bus-fares';
+import { BUS_FARE_TABLE_DATE, busFareApplies, busFareLabel, findBusFares, findOfficialFares, findStopoverFares, formatWon, type BusFare, type OfficialFare, type OfficialFareData, type StopoverFareData } from './bus-fares';
 import { alternativeRegions, regionLabel, resolveFareRoute, sameNameProvinces, sameRegion, type FareRegion, type ResolvedRegion } from './fare-region';
-import { fetchLiveFares, isLiveFareEnabled } from './tago-live';
+import { fetchLiveFares, isLiveFareEnabled, liveFareDay } from './tago-live';
 import tagoFaresJson from './data/tago-fares.json';
 import stopoverFaresJson from './data/stopover-fares.json';
 const OFFICIAL_FARES = tagoFaresJson as OfficialFareData;
@@ -945,10 +945,23 @@ function setupBusFareSuggestions(): void {
       : fare.실시간
         ? `국토교통부 ${info}(TAGO) 실시간 조회 · ${fare.조회일} 배차 기준`
         : `국토교통부 ${info}(TAGO) ${fare.조회일 ?? OFFICIAL_FARES.조회일} 조회`;
-    btn.title = `${source} · ${fare.출발}→${fare.도착} ${grade} ${value}원${differs ? '. 교육지원청 요금표와 금액이 다르니 어느 쪽을 쓸지 확인하세요.' : ''}`;
+    const range = fare.최고 ? ` (배차·터미널에 따라 ${value}~${formatWon(fare.최고)}원)` : '';
+    const reversed = fare.역방향 ? ' · 반대 방향 배차 기준(운임 동일)' : '';
+    btn.title = `${source} · ${fare.출발}→${fare.도착} ${grade} ${value}원${range}${reversed}${differs ? '. 교육지원청 요금표와 금액이 다르니 어느 쪽을 쓸지 확인하세요.' : ''}`;
     btn.setAttribute('aria-pressed', 'false');
     btn.addEventListener('click', () => { setAmount(amount, value); markPressed(wrap, amount); });
     return btn;
+  };
+  /** 교통편이 버스가 아니면(기차/KTX·항공 …) 버스 운임은 참고용으로만 보여 주고 금액을 자동으로 넣지 않는다 — 그 안내 칩. */
+  const transportNote = (wrap: HTMLElement, transport: string): void => {
+    if (busFareApplies(transport) || !wrap.querySelector('button[data-amount]') || wrap.querySelector('[data-transport-note]')) return;
+    const note = document.createElement('span');
+    note.className = 'attachment-preset-chip attachment-preset-chip--status';
+    note.dataset.transportNote = '';
+    note.textContent = `교통편 ${transport.trim()} · 버스 운임은 참고용 (자동 입력 안 함)`;
+    note.title = `교통편이 "${transport.trim()}"이라 버스 운임을 금액에 자동으로 넣지 않습니다. 실제 지불한 운임을 입력하세요. 칩을 누르면 그 금액이 들어갑니다.`;
+    wrap.prepend(note);
+    wrap.hidden = false;
   };
   /**
    * 동명 지역을 짐작해 정한 칸이면 "경남 고성으로 바꾸기" 칩 — 누르면 그 칸의 시도를 기억하고 다시 계산한다.
@@ -986,8 +999,15 @@ function setupBusFareSuggestions(): void {
       // TAGO 에 없는 경유 구간(중간 정차)은 관리자가 채운 보완 요금표로 메운다.
       const tagoFares = findOfficialFares(route.from, route.to, OFFICIAL_FARES);
       const official = tagoFares.length ? tagoFares : findStopoverFares(route.from, route.to, STOPOVER_FARES);
+      const transport = fieldValue(`${direction}교통편`);
+      const autoFill = busFareApplies(transport);
       const previousAuto = autoBusFares.get(amount.name);
-      const untouched = isUntouched(amount);
+      // 교통편을 기차/KTX 등으로 바꾸면, 버스 운임으로 자동 입력했던 금액은 비운다 (직접 쓴 금액은 그대로).
+      if (!autoFill && previousAuto !== undefined && amount.value === previousAuto) {
+        setAmount(amount, '');
+        autoBusFares.delete(amount.name);
+      }
+      const untouched = autoFill && isUntouched(amount);
       wrap.replaceChildren();
       if (fares.length === 0) {
         // 요금표에 없는 구간: 공식 운임이 있으면 그것을 제안하고, 없으면 자동으로 채웠던 금액만 비운다.
@@ -1018,11 +1038,12 @@ function setupBusFareSuggestions(): void {
       }
       [...regionSwitchChips(fromName, '출발지', route.from, fromHint?.바꿈 ?? false), ...regionSwitchChips(toName, '도착지', route.to, toHint?.바꿈 ?? false)]
         .forEach((chip) => wrap.appendChild(chip));
+      transportNote(wrap, transport);
       wrap.hidden = wrap.childElementCount === 0;
       markPressed(wrap, amount);
       // 요금표·공식 운임이 있어도 네이버지도에서 맞춰 볼 수 있게 링크는 늘 둔다
       renderNaverLink(wrap, route.from, route.to);
-      renderLiveFares(wrap, amount, route, fares);
+      renderLiveFares(wrap, amount, route, fares, transport);
     }
   };
   /** 출발·도착 터미널 좌표를 찾아 네이버지도 대중교통 길찾기 링크를 보여준다. 늦게 온 앞 구간의 결과는 버린다. */
@@ -1072,14 +1093,15 @@ function setupBusFareSuggestions(): void {
     amount: HTMLInputElement,
     route: { from: FareRegion | null; to: FareRegion | null },
     tableFares: BusFare[],
+    transport: string,
   ): void => {
     const token = (liveTokens.get(wrap) ?? 0) + 1;
     liveTokens.set(wrap, token);
     window.clearTimeout(liveTimers.get(wrap));
     const { from, to } = route;
     if (!isLiveFareEnabled() || !from || !to || sameRegion(from, to)) return;
-    // 날짜를 넣어 두면 창을 하루 넘게 열어 둬도 그날 배차로 다시 조회한다.
-    const routeKey = `${from.시도} ${from.시군}>${to.시도} ${to.시군}:${new Date().toDateString()}`;
+    // 날짜(한국 시간)를 넣어 두면 창을 하루 넘게 열어 둬도 그날 배차로 다시 조회한다.
+    const routeKey = `${from.시도} ${from.시군}>${to.시도} ${to.시군}:${liveFareDay()}`;
     const apply = (live: OfficialFare[]): void => {
       wrap.querySelectorAll('[data-live-status]').forEach((el) => el.remove());
       if (live.length === 0) {
@@ -1096,8 +1118,9 @@ function setupBusFareSuggestions(): void {
         if (live[0].요금 !== tableFares[0].요금) insert(officialChip(wrap, amount, live[0], true));
       } else {
         live.forEach((fare) => insert(officialChip(wrap, amount, fare, false)));
-        if (isUntouched(amount)) setAmount(amount, formatWon(live[0].요금));
+        if (busFareApplies(transport) && isUntouched(amount)) setAmount(amount, formatWon(live[0].요금));
       }
+      transportNote(wrap, transport);
       wrap.hidden = false;
       markPressed(wrap, amount);
     };
@@ -1120,7 +1143,7 @@ function setupBusFareSuggestions(): void {
     }, LIVE_FARE_DELAY_MS));
   };
   for (const direction of ['갈때', '올때']) {
-    for (const suffix of ['출발지', '도착지']) {
+    for (const suffix of ['출발지', '도착지', '교통편']) {
       const input = formEl.elements.namedItem(`${direction}${suffix}`);
       if (!(input instanceof HTMLInputElement)) continue;
       input.addEventListener('input', sync);
@@ -1780,7 +1803,7 @@ async function initialize(): Promise<void> {
       if (applyReturnLocationDefault(label)) {
         applyReturnLocationsToPreview();
       }
-      if (label.endsWith('출발지') || label.endsWith('도착지')) syncBusFares?.();
+      if (label.endsWith('출발지') || label.endsWith('도착지') || label.endsWith('교통편')) syncBusFares?.();
       refreshPreviewAndRealignSignatureStamp();
       fields = discoverFields(wasm);
       saveFormState();

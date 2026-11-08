@@ -142,6 +142,10 @@ export interface OfficialFare {
   고속?: boolean;
   /** TAGO 가 아니라 경유 구간 보완 요금표(관리자 입력)에서 온 값이면 그 노선·출처 */
   보완?: { 노선?: string; 출처: string };
+  /** 같은 등급인데 배차·터미널에 따라 요금이 다르면 그중 가장 비싼 요금 (요금이 하나뿐이면 없음) */
+  최고?: number;
+  /** 반대 방향 배차 자료를 뒤집어 쓴 값이면 true (시외버스 운임은 양방향이 같다고 본다) */
+  역방향?: boolean;
 }
 
 export interface OfficialFareData {
@@ -160,29 +164,69 @@ export function sortOfficialFares(fares: readonly OfficialFare[]): OfficialFare[
   return fares.filter((f) => !/심야|주말/.test(f.등급)).sort((x, y) => gradeRank(x.등급) - gradeRank(y.등급) || x.요금 - y.요금);
 }
 
-/** 여러 터미널 쌍에서 받은 요금을 등급별 최저 요금 하나씩으로 합친다 (그 요금의 출발·도착 터미널을 그대로 둔다). */
+/**
+ * 여러 터미널 쌍에서 받은 요금을 등급별 최저 요금 하나씩으로 합친다 (그 요금의 출발·도착 터미널을 그대로 둔다).
+ * 같은 등급의 요금이 터미널마다 다르면 가장 비싼 값을 최고로 함께 둔다 ("배차에 따라 8,400~10,800").
+ */
 export function mergeOfficialFares(lists: readonly (readonly OfficialFare[])[]): OfficialFare[] {
   const byGrade = new Map<string, OfficialFare>();
+  const highest = new Map<string, number>();
   for (const fare of lists.flat()) {
     const best = byGrade.get(fare.등급);
     if (!best || fare.요금 < best.요금) byGrade.set(fare.등급, fare);
+    highest.set(fare.등급, Math.max(highest.get(fare.등급) ?? 0, fare.최고 ?? fare.요금));
   }
-  return sortOfficialFares([...byGrade.values()]);
+  return sortOfficialFares([...byGrade].map(([grade, fare]) => {
+    const top = highest.get(grade) ?? fare.요금;
+    return top > fare.요금 ? { ...fare, 최고: top } : fare;
+  }));
 }
 
-/** TAGO 배차 목록(charge·gradeNm)을 등급별 최저 요금으로 묶는다. */
+/** TAGO 배차 목록(charge·gradeNm)을 등급별 최저 요금으로 묶는다. 같은 등급에 요금이 여럿이면 가장 비싼 값을 최고로 둔다. */
 export function summarizeFareRows(
   rows: readonly { charge?: unknown; gradeNm?: unknown }[],
   route: Pick<OfficialFare, '출발' | '도착' | '도착시도' | '조회일' | '실시간' | '고속'>,
 ): OfficialFare[] {
-  const byGrade = new Map<string, number>();
+  const byGrade = new Map<string, { min: number; max: number }>();
   for (const row of rows) {
     const charge = Number(row.charge);
     if (!Number.isFinite(charge) || charge <= 0) continue;
     const grade = String(row.gradeNm ?? '일반');
-    byGrade.set(grade, Math.min(byGrade.get(grade) ?? Infinity, charge));
+    const range = byGrade.get(grade);
+    if (!range) byGrade.set(grade, { min: charge, max: charge });
+    else { range.min = Math.min(range.min, charge); range.max = Math.max(range.max, charge); }
   }
-  return sortOfficialFares([...byGrade].map(([등급, 요금]) => ({ ...route, 등급, 요금 })));
+  return sortOfficialFares([...byGrade].map(([등급, { min, max }]) => (
+    max > min ? { ...route, 등급, 요금: min, 최고: max } : { ...route, 등급, 요금: min }
+  )));
+}
+
+/**
+ * 반대 방향 배차 자료를 이쪽 방향 값으로 뒤집는다 (출발↔도착). 시외버스 운임은 양방향이 같은데
+ * TAGO 는 한쪽 방향 자료만 있는 구간이 많아(속초→춘천은 있고 춘천→속초는 없음) 뒤집어 쓴다.
+ * 도착시도는 새 도착지(원래 출발지)의 시도.
+ */
+export function reverseOfficialFares(fares: readonly OfficialFare[], 도착시도 = ''): OfficialFare[] {
+  return fares.map((fare) => {
+    const swapped: OfficialFare = { ...fare, 출발: fare.도착, 도착: fare.출발, 역방향: true };
+    if (도착시도) swapped.도착시도 = 도착시도;
+    else delete swapped.도착시도;
+    return swapped;
+  });
+}
+
+/** 등급 이름이 prefix 로 시작하는 요금이 있는가 (예: '일반'). */
+export function hasGrade(fares: readonly OfficialFare[], prefix: string): boolean {
+  return fares.some((fare) => fare.등급.startsWith(prefix));
+}
+
+/**
+ * 교통편 칸 값에 버스 운임을 자동으로 넣어도 되는가. 비어 있거나 버스, 또는 대중교통 운임 기준으로 청구하는 일이 많은
+ * 자가용이면 true. 기차/KTX·항공·지하철·택시처럼 버스 요금과 무관한 교통편이면 false — 칩은 참고용으로만 보여 준다.
+ */
+export function busFareApplies(transport: string): boolean {
+  const text = (transport ?? '').trim();
+  return text === '' || /버스|자가용|자차|승용|관용|자동차|차량|렌터?카/.test(text);
 }
 
 /**

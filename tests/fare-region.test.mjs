@@ -39,6 +39,7 @@ test('칸에 시도를 함께 쓰면 그대로 읽는다', () => {
 test('이름이 하나뿐인 시군은 시도가 정해진다', () => {
   assert.deepEqual(resolveFareRegion('춘천'), { 시도: '강원', 시군: '춘천' });
   assert.deepEqual(resolveFareRegion('수원시'), { 시도: '경기', 시군: '수원' });
+  assert.deepEqual(resolveFareRegion('봉화'), { 시도: '경북', 시군: '봉화' });
   assert.deepEqual(resolveFareRegion('동서울'), { 시도: '서울', 시군: '서울' });
   assert.deepEqual(resolveFareRegion('삼척·동해'), { 시도: '', 시군: '삼척·동해' });
   assert.equal(resolveFareRegion(''), null);
