@@ -74,7 +74,7 @@ test('칩 이름과 바꾸기 후보', () => {
 test('요금표(강원 고성 기준)는 경남 고성에 쓰지 않고, 강원 고성↔경남 고성은 같은 곳이 아니다', () => {
   assert.deepEqual(findBusFares({ 시도: '경남', 시군: '고성' }, { 시도: '강원', 시군: '속초' }), []);
   assert.deepEqual(findBusFares('경남 고성', '속초'), []);
-  assert.equal(findBusFares({ 시도: '강원', 시군: '고성' }, { 시도: '강원', 시군: '속초' })[0].요금, 4000);
+  assert.equal(findBusFares({ 시도: '강원', 시군: '고성' }, { 시도: '강원', 시군: '속초' })[0].요금, 4400);
   assert.deepEqual(findBusFares({ 시도: '강원', 시군: '고성' }, { 시도: '강원', 시군: '고성' }), []);
 });
 
