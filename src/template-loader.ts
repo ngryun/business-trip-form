@@ -1,3 +1,4 @@
+import { HwpDocument } from '@wasm/rhwp.js';
 import { WasmBridge } from '@/core/wasm-bridge';
 import type { DocumentInfo } from '@/core/types';
 
@@ -37,4 +38,20 @@ export async function fetchTemplateBytes(url: string): Promise<Uint8Array> {
     );
   }
   return bytes;
+}
+
+/**
+ * 엔진이 열 수 있는 문서인지 따로 열어 본다 — 못 열면 그 이유, 열리면 null. (엔진 초기화 뒤에만 쓴다.)
+ *
+ * WasmBridge.loadDocument 는 새 문서를 열기 전에 쓰던 문서를 먼저 놓아 버려서, 여는 데 실패하면
+ * 그 뒤의 모든 로드가 "null pointer passed to rust" 로 실패한다 (새로고침 전까지 복구 불가).
+ * 사용자가 올린 파일처럼 믿을 수 없는 문서는 여기서 먼저 걸러 낸다.
+ */
+export function documentOpenProblem(bytes: Uint8Array): string | null {
+  try {
+    new HwpDocument(bytes).free();
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
 }

@@ -2,6 +2,7 @@ import terminalsJson from './data/tago-terminals.json';
 import expressTerminalsJson from './data/tago-express-terminals.json';
 import { hasGrade, mergeOfficialFares, reverseOfficialFares, sortOfficialFares, summarizeFareRows, type OfficialFare } from './bus-fares';
 import { expressTerminalsForRegion, terminalsForRegion, type FareRegion, type TagoTerminal } from './fare-region';
+import { isTagoLimitError, parseTagoResponse } from './tago-response';
 
 /**
  * 국토교통부 TAGO 시외버스정보 API를 브라우저에서 바로 불러 출발지→도착지 공식 운임을 찾는다.
@@ -89,18 +90,13 @@ async function callTago(service: Service, dep: TagoTerminal, arr: TagoTerminal, 
   const timer = window.setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
     const res = await fetch(`${service.base}/${service.op}?serviceKey=${serviceKey}&${qs}`, { signal: controller.signal });
-    const json = await res.json();
-    const header = json?.response?.header;
-    if (header?.resultCode !== '00') {
-      const message = String(header?.resultMsg ?? res.status);
-      if (!retried && /LIMITED_NUMBER_OF_SERVICE_REQUESTS/.test(message)) {
-        await new Promise((resolve) => window.setTimeout(resolve, RATE_LIMIT_RETRY_MS));
-        return callTago(service, dep, arr, true);
-      }
-      throw new Error(`TAGO: ${message}`);
+    try {
+      return parseTagoResponse(await res.text(), res.status);
+    } catch (err) {
+      if (retried || !isTagoLimitError(err)) throw err;
     }
-    const item = json.response.body?.items?.item;
-    return Array.isArray(item) ? item : item ? [item] : [];
+    await new Promise((resolve) => window.setTimeout(resolve, RATE_LIMIT_RETRY_MS));
+    return callTago(service, dep, arr, true);
   } finally {
     window.clearTimeout(timer);
   }

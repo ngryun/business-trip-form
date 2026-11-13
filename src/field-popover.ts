@@ -16,7 +16,6 @@ import { ATTACHMENT_PRESETS, hasAttachmentItem, toggleAttachmentItem } from './a
 import {
   FIELD_CONFIGS,
   formatDateKR,
-  formatDateTimeCompactKR,
   type WidgetConfig,
 } from './field-config';
 
