@@ -1,7 +1,7 @@
 import { setupFormTabs } from './form-tabs';
 import { applyExpenseFields, clearFareRows, expenseCellsWritable, FARE_FIELD_SUFFIXES } from './expense-fields';
 import { getCellRegions, invalidateCellRegions } from './cell-fields';
-import { documentOpenProblem, fetchTemplateBytes, loadTemplate } from './template-loader';
+import { createWasmBridge, documentOpenProblem, fetchTemplateBytes } from './template-loader';
 import { TEMPLATE_FILES, templateKindFor, type TemplateKind } from './template-kind';
 import { applyTripNameLine } from './trip-name';
 import { clearCustomTemplate, customTemplateProblem, loadCustomTemplate, saveCustomTemplate, type CustomTemplate } from './custom-template';
@@ -60,6 +60,7 @@ import {
 const templateUrl = (kind: TemplateKind): string => `${import.meta.env.BASE_URL}${TEMPLATE_FILES[kind]}`;
 const FORM_STORAGE_KEY = 'business-trip-form:form-values:v1';
 const EDIT_HINTS_STORAGE_KEY = 'business-trip-form:edit-hints:v1';
+const EXTENSION_GUIDE_STORAGE_KEY = 'business-trip-form:extension-guide-hidden:v1';
 
 const statusEl = document.getElementById('status') as HTMLElement;
 const formEl = document.getElementById('trip-form') as HTMLFormElement;
@@ -81,9 +82,11 @@ const TRAVEL_DATE_DEFAULTS: Record<string, string> = {
   시작일시: '갈때일자',
   종료일시: '올때일자',
 };
-const RETURN_LOCATION_DEFAULTS: Record<string, string> = {
+/** 갈 때 값으로 채우는 올 때 칸 — 출발지·도착지는 거꾸로, 교통편은 그대로 (대개 같은 교통편으로 돌아온다). */
+const RETURN_TRIP_DEFAULTS: Record<string, string> = {
   갈때출발지: '올때도착지',
   갈때도착지: '올때출발지',
+  갈때교통편: '올때교통편',
 };
 /** 지도 검색으로 도시명을 찾아 채울 곳 — 소속은 갈 때 출발지, 출장지는 갈 때 도착지 (올 때는 위 규칙이 거꾸로 채운다) */
 const PLACE_CITY_DEFAULTS: Record<string, string> = {
@@ -628,6 +631,28 @@ function setupPanelToggle(): void {
   syncAria();
 }
 
+/**
+ * 크롬 확장프로그램 안내 — 「안내 닫기」를 누르면 이 브라우저에서는 다시 보이지 않는다.
+ * 확장프로그램이 넘긴 링크로 열었으면 이미 설치한 사람이므로 처음부터 감춘다.
+ * (휴대폰·태블릿은 확장프로그램을 설치할 수 없어 CSS 가 감춘다.)
+ */
+function setupExtensionGuide(openedByExtension: boolean): void {
+  const guide = document.querySelector<HTMLElement>('.extension-guide');
+  if (!guide) return;
+  const hide = (): void => {
+    guide.hidden = true;
+    try {
+      localStorage.setItem(EXTENSION_GUIDE_STORAGE_KEY, '1');
+    } catch { /* 저장소를 못 쓰면 이번 방문에만 감춘다 */ }
+  };
+  let dismissed = false;
+  try {
+    dismissed = localStorage.getItem(EXTENSION_GUIDE_STORAGE_KEY) === '1';
+  } catch { /* 저장소를 못 쓰면 안내를 보인다 */ }
+  if (dismissed || openedByExtension) hide();
+  document.getElementById('btn-hide-extension-guide')?.addEventListener('click', hide);
+}
+
 function setupDateTimeControls(): void {
   const startControl = formEl.querySelector<HTMLElement>('[data-datetime-picker="시작일시"]');
   const endControl = formEl.querySelector<HTMLElement>('[data-datetime-picker="종료일시"]');
@@ -677,12 +702,13 @@ function setupDateTimeControls(): void {
   document.getElementById('datetime-range')?.appendChild(dateTimeRangeChrome.root);
 }
 
-function setupReturnLocationDefaults(): void {
-  for (const sourceName of Object.keys(RETURN_LOCATION_DEFAULTS)) {
+function setupReturnTripDefaults(): void {
+  for (const sourceName of Object.keys(RETURN_TRIP_DEFAULTS)) {
     const source = formEl.elements.namedItem(sourceName);
     if (!(source instanceof HTMLInputElement)) continue;
     const apply = (): void => {
-      applyReturnLocationDefault(sourceName);
+      // 올 때 교통편이 바뀌면 그 칸의 빠른 선택 칩 표시도 맞춘다 (값만 바꿔서 칩 쪽 input 이벤트가 없다).
+      if (applyReturnTripDefault(sourceName)) syncPresetChips?.();
     };
     source.addEventListener('input', apply);
     source.addEventListener('change', apply);
@@ -821,8 +847,8 @@ function applyTravelDateDefault(control: HTMLElement): void {
   autoTravelDates.set(targetName, date);
 }
 
-function applyReturnLocationDefault(sourceName: string): boolean {
-  const targetName = RETURN_LOCATION_DEFAULTS[sourceName];
+function applyReturnTripDefault(sourceName: string): boolean {
+  const targetName = RETURN_TRIP_DEFAULTS[sourceName];
   if (!targetName) return false;
 
   const source = formEl.elements.namedItem(sourceName) as HTMLInputElement | null;
@@ -976,12 +1002,15 @@ async function initialize(): Promise<void> {
   // setupDateTimeControls 보다 먼저 채워야 일시 picker 가 초기화 때 hidden input 값을 읽어 간다.
   const urlEntries = readUrlFormEntries();
   const urlFormApplied = urlEntries.length > 0;
+  // 「URL 공유」 표시가 없는 링크는 확장프로그램이 넘긴 것이다 (주소창을 지우기 전에 본다).
+  setupExtensionGuide(urlFormApplied && !isShareButtonUrl());
   const restoredFormState = restoreFormState(urlFormApplied ? URL_CARRY_OVER_KEYS : undefined);
   for (const [control, value] of urlEntries) setFormControlValue(control, value);
   setupFareRowControls();
   setDefaultSubmitDate();
   setupDateTimeControls();
-  setupReturnLocationDefaults();
+  // 운임 제안보다 먼저 붙인다 — 갈 때 교통편·장소를 고치면 올 때 칸을 먼저 채운 뒤 두 방향 운임을 다시 계산하도록.
+  setupReturnTripDefaults();
   fareSuggestions = setupFareSuggestions(formEl);
   setupPlaceCityLookup();
   syncTemplateOnlyInputs();
@@ -1003,14 +1032,20 @@ async function initialize(): Promise<void> {
     saveFormState();
     clearUrlFormValues();
   }
-  await preloadFonts();
-
-  // 1) HWP 양식 fetch + 로드 — 소속에 따라 바꿔 끼울 수 있게 두 양식을 모두 받아 두고, 지금 소속의 양식을 연다.
-  const { wasm, docInfo, templateBytes: defaultTemplateBytes } = await loadTemplate(templateUrl('default'));
+  // 1) 글꼴·HWP 엔진·양식 두 개(소속에 따라 바꿔 끼운다)를 한꺼번에 받는다 — 예전처럼 글꼴을 다 받은 뒤에
+  //    엔진을, 그다음 양식을 차례로 받으면 느린 학교망에서 그 합만큼 첫 화면이 늦다.
+  //    문서를 여는 것(글자 폭을 재 줄을 나눈다)은 기본 글꼴까지 다 온 뒤에 한다.
+  const [wasm, defaultTemplateBytes, taebaekTemplateBytes] = await Promise.all([
+    createWasmBridge(),
+    fetchTemplateBytes(templateUrl('default')),
+    fetchTemplateBytes(templateUrl('taebaek')),
+    preloadFonts(),
+  ]);
   const templateBytesByKind: Record<TemplateKind, Uint8Array> = {
     default: defaultTemplateBytes,
-    taebaek: await fetchTemplateBytes(templateUrl('taebaek')),
+    taebaek: taebaekTemplateBytes,
   };
+  const docInfo = wasm.loadDocument(templateBytesByKind.default, 'business-trip.hwp');
   const taebaekDocInfo = wasm.loadDocument(templateBytesByKind.taebaek, 'business-trip-taebaek.hwp');
   const templateBytes = (kind: ActiveTemplate): Uint8Array =>
     (kind === 'custom' && customTemplate ? customTemplate.bytes : templateBytesByKind[kind === 'custom' ? 'default' : kind]);
@@ -1172,9 +1207,9 @@ async function initialize(): Promise<void> {
     setFieldValues(wasm, fields, { 갈때일자, 올때일자 });
   }
 
-  function applyReturnLocationsToPreview(): void {
-    const { 올때출발지, 올때도착지 } = collectFormValues();
-    setFieldValues(wasm, fields, { 올때출발지, 올때도착지 }, { clearEmpty: true });
+  function applyReturnTripToPreview(): void {
+    const { 올때교통편, 올때출발지, 올때도착지 } = collectFormValues();
+    setFieldValues(wasm, fields, { 올때교통편, 올때출발지, 올때도착지 }, { clearEmpty: true });
   }
 
   if (urlFormApplied) {
@@ -1336,8 +1371,9 @@ async function initialize(): Promise<void> {
       if (label === '시작일시' || label === '종료일시') {
         applyTravelDatesToPreview();
       }
-      if (applyReturnLocationDefault(label)) {
-        applyReturnLocationsToPreview();
+      if (applyReturnTripDefault(label)) {
+        applyReturnTripToPreview();
+        syncPresetChips?.();
       }
       if (label.endsWith('출발지') || label.endsWith('도착지') || label.endsWith('교통편')) fareSuggestions?.sync();
       refreshPreviewAndRealignSignatureStamp();

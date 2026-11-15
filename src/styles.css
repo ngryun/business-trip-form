@@ -70,6 +70,25 @@ html, body {
 }
 .extension-guide__button:hover { background: #1d4ed8; }
 .extension-guide__button:focus-visible { outline: 2px solid #93c5fd; outline-offset: 3px; }
+.extension-guide__close {
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid #4b5563;
+  border-radius: 6px;
+  background: transparent;
+  color: #d1d5db;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.extension-guide__close:hover { background: #374151; color: #f9fafb; }
+.extension-guide__close:focus-visible { outline: 2px solid #93c5fd; outline-offset: 3px; }
+/* display:flex 가 hidden 속성을 이기지 않게 한다 (안내 닫기·확장프로그램으로 연 경우). */
+.extension-guide[hidden] { display: none; }
+/* 휴대폰·태블릿 브라우저에는 크롬 확장프로그램을 설치할 수 없어 안내가 화면만 차지한다. */
+@media (hover: none) and (pointer: coarse) {
+  .extension-guide { display: none; }
+}
 
 .panel-toggle {
   flex: 0 0 auto;
@@ -1155,7 +1174,7 @@ html, body {
   padding: 0 3px 0 4px; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; color: #0f172a; font-size: 14px;
 }
 .date-input:focus-within, .time-input:focus-within { border-color: #2563eb; box-shadow: 0 0 0 1px #2563eb; }
-.date-input:has([aria-invalid="true"]), .time-input:has([aria-invalid="true"]) { border-color: #dc2626; }
+.date-input:has([aria-invalid="true"]), .time-input:has([aria-invalid="true"]), .date-input.is-invalid { border-color: #dc2626; }
 .datetime-picker__inputs .date-input__part, .datetime-picker__inputs .time-input__part {
   box-sizing: border-box; width: 0; min-width: 0; flex: 2; min-height: 0; margin: 0; padding: 8px 0; border: 0; border-radius: 4px;
   background: transparent; color: inherit; font: inherit; text-align: center;

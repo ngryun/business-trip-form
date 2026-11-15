@@ -30,8 +30,18 @@ export function attachInputPanel(panel: HTMLElement, options: InputPanelOptions)
   button.setAttribute('aria-expanded', 'false');
   let open = false;
 
+  function stopTracking(): void {
+    window.removeEventListener('scroll', place, { capture: true } as EventListenerOptions);
+    window.removeEventListener('resize', place);
+  }
   function place(): void {
     if (!open) return;
+    // 미리보기 팝오버를 닫으면서 열린 판째로 DOM 에서 빠지면 toggle 이벤트가 오지 않는다 — 여기서 정리한다.
+    if (!panel.isConnected) {
+      setOpen(false);
+      stopTracking();
+      return;
+    }
     const margin = 8;
     const anchorRect = anchor.getBoundingClientRect();
     const size = panel.getBoundingClientRect();
@@ -58,8 +68,7 @@ export function attachInputPanel(panel: HTMLElement, options: InputPanelOptions)
       const opening = (event as ToggleEvent).newState === 'open';
       setOpen(opening);
       if (!opening) {
-        window.removeEventListener('scroll', place, { capture: true } as EventListenerOptions);
-        window.removeEventListener('resize', place);
+        stopTracking();
         return;
       }
       options.onOpen?.();

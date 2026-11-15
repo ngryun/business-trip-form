@@ -1,4 +1,4 @@
-import { todayDateValue } from './date-range';
+import { resolveYearlessDate, todayDateValue } from './date-range';
 import { attachInputPanel } from './input-panel';
 
 export interface DateInputHandle {
@@ -12,7 +12,9 @@ const CALENDAR_ICON = '<svg viewBox="0 0 24 24" width="17" height="17" fill="non
 
 /**
  * 연 → 월 → 일 순서로 타이핑하거나 달력 버튼으로 고르는 날짜 입력.
- * - 연도 칸은 올해를 안내문으로 보여 주고, 비워 두고 월·일만 적으면 올해로 본다.
+ * - 연도 칸은 올해를 안내문으로 보여 주고, 비워 두고 월·일만 적으면 오늘 기준 9개월 전~3개월 뒤에 드는 해로 본다
+ *   (resolveYearlessDate — 1월 초에 12.28 을 적으면 지난해). 칸을 벗어나면 그 해가 연도 칸에 채워진다.
+ * - 두 자리 연도(26)는 칸을 벗어날 때 2026 으로, 첫 자리가 2~9 인 월은 한 자리 월(02~09)로 보고 일 칸으로 넘어간다.
  * - 달력은 늘 오늘이 있는 달을 먼저 펼치고 오늘을 표시한다. 다른 달의 날짜를 이미 골랐으면 그 달로 가는 버튼을 함께 보여 준다.
  * 값이 바뀌면 root 에 `change` 를 올린다(detail.source 가 'panel' 이면 달력에서 고른 것).
  */
@@ -47,31 +49,47 @@ export function createDateInput(): DateInputHandle {
 
   function getValue(): string {
     const [year, month, day] = fields.map(input => input.value);
-    const resolvedYear = year || String(new Date().getFullYear());
-    if (resolvedYear.length !== 4 || !month || !day) return '';
-    const value = `${resolvedYear}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    if ((year && year.length !== 4) || !month || !day) return '';
+    const value = year ? `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}` : resolveYearlessDate(month, day);
     const parsed = new Date(`${value}T00:00:00Z`);
-    return Number(resolvedYear) > 0 && !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value ? value : '';
+    return Number(value.slice(0, 4)) > 0 && !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value ? value : '';
   }
   function setValue(value: string): void {
     const parts = value.split('-');
     fields.forEach((input, i) => { if (input.value !== (parts[i] ?? '')) input.value = parts[i] ?? ''; });
+    root.classList.toggle('is-invalid', false);
   }
   function changed(source: 'typing' | 'panel' = 'typing'): void {
     root.dispatchEvent(new CustomEvent('change', { bubbles: true, detail: { source } }));
   }
   fields.forEach((input, i) => {
     input.addEventListener('focus', () => input.select());
-    input.addEventListener('input', () => {
+    input.addEventListener('input', (event) => {
       input.value = input.value.replace(/\D/g, '').slice(0, input.maxLength);
+      // 월은 12, 일은 31 까지라 첫 자리가 2 이상인 월은 한 자리 월(02~09)로 보고, 범위를 넘는 둘째 자리는 버린다
+      // (시간 칸과 같은 규칙). 지우는 중에는 고치지 않는다 — 12 에서 2 를 지운 1 이 01 로 바뀌면 안 된다.
+      const deleting = (event as InputEvent).inputType?.startsWith('delete') ?? false;
+      if (i === 1 && !deleting) {
+        if (input.value.length === 1 && Number(input.value) > 1) input.value = `0${input.value}`;
+        if (Number(input.value) > 12) input.value = input.value[0];
+      }
+      if (i === 2 && !deleting && Number(input.value) > 31) input.value = input.value[0];
+      root.classList.toggle('is-invalid', false);
       // 다음 구간을 먼저 선택해야 blur 시 값 보정이 현재 편집을 건드리지 않는다.
       if (input.value.length === input.maxLength && i < 2) fields[i + 1].focus();
       changed();
     });
+    if (i === 0) {
+      // 두 자리 연도(26)는 칸을 벗어날 때 2026 으로 본다. 여기서는 알리지 않는다 — 묶음을 벗어날 때 한꺼번에 확정된다.
+      input.addEventListener('blur', () => {
+        if (/^\d{2}$/.test(input.value)) input.value = `20${input.value}`;
+      });
+    }
     input.addEventListener('keydown', (event) => {
       if ((event.key === '-' || event.key === '/' || event.key === '.') && i < 2) {
         event.preventDefault();
-        fields[i + 1].focus();
+        // 빈 월 칸에서 친 구분자는 넘기지 않는다 — "2026.3.15" 처럼 치면 연도 네 자리에서 이미 월 칸으로 넘어와 있다.
+        if (input.value || i === 0) fields[i + 1].focus();
       } else if (event.key === 'Backspace' && !input.value && i > 0) {
         event.preventDefault();
         fields[i - 1].focus();
@@ -93,6 +111,11 @@ export function createDateInput(): DateInputHandle {
       root.append(separator);
     }
     root.append(input);
+  });
+  // 묶음을 벗어날 때 숫자는 있는데 날짜가 되지 않으면(2.30, 연도만 등) 빨간 테두리로 알린다 — 값은 비어 있다.
+  root.addEventListener('focusout', (event) => {
+    if (root.contains((event as FocusEvent).relatedTarget as Node | null)) return;
+    root.classList.toggle('is-invalid', fields.some((input) => input.value !== '') && !getValue());
   });
 
   const handle = attachInputPanel(panel, {
