@@ -101,6 +101,8 @@ const autoTravelDates = new Map<string, string>();
 const autoReturnLocations = new Map<string, string>();
 /** 지도 검색으로 채운 출발지·도착지 값 — 사용자가 직접 고친 값은 덮어쓰지 않으려고 기억한다. */
 const autoPlaceCities = new Map<string, string>();
+/** 저장본에서 읽은 자동 운임 금액 — 운임 제안을 붙인 뒤 넘겨준다 (restoreFormState 가 먼저 돈다). */
+let restoredAutoBusFares: Record<string, string> = {};
 /** 운임 탭의 금액 제안 칩 (fare-suggestions.ts) — 설정 전에는 null */
 let fareSuggestions: FareSuggestionsHandle | null = null;
 let liveDateTimePreviewHandler: (() => void) | null = null;
@@ -126,6 +128,8 @@ interface PreviewApplyOptions {
 }
 
 interface SavedFormState {
+  /** 운임 칩이 자동으로 넣은 금액 — 새로고침 뒤에도 경로를 바꾸면 새 운임으로 바뀌게 기억한다. */
+  autoBusFares?: Record<string, string>;
   autoPlaceCities?: Record<string, string>;
   autoReturnLocations?: Record<string, string>;
   autoTravelDates?: Record<string, string>;
@@ -426,13 +430,10 @@ const URL_CARRY_OVER_KEYS: ReadonlySet<string> = new Set(['소속', '직급', '�
  * 링크로 연 새 출장에 지난 출장의 값이 섞여 빈칸 확인에도 걸리지 않은 채 찍히던 문제를 막는다.
  */
 function restoreFormState(keepOnly?: ReadonlySet<string>): boolean {
-  let saved: SavedFormState | null = null;
-  try {
-    const raw = localStorage.getItem(FORM_STORAGE_KEY);
-    saved = raw ? JSON.parse(raw) as SavedFormState : null;
-  } catch {
-    return false;
-  }
+  // 이 탭의 저장본(sessionStorage)이 먼저다 — 여러 출장을 탭마다 열어 두고 한 탭을 새로고침해도
+  // 다른 탭에서 마지막으로 고친 출장으로 바뀌지 않는다. 링크로 연 새 출장(keepOnly)과 새 탭은 공용 저장본을 쓴다.
+  const tab = keepOnly ? null : readStoredFormState('sessionStorage');
+  const saved = tab?.values ? tab : readStoredFormState('localStorage');
   if (!saved?.values) return false;
 
   for (const [name, value] of Object.entries(saved.values)) {
@@ -444,6 +445,7 @@ function restoreFormState(keepOnly?: ReadonlySet<string>): boolean {
   autoTravelDates.clear();
   autoReturnLocations.clear();
   autoPlaceCities.clear();
+  restoredAutoBusFares = {};
   if (keepOnly) return true;
   for (const [name, value] of Object.entries(saved.autoTravelDates ?? {})) {
     autoTravelDates.set(name, value);
@@ -454,6 +456,7 @@ function restoreFormState(keepOnly?: ReadonlySet<string>): boolean {
   for (const [name, value] of Object.entries(saved.autoPlaceCities ?? {})) {
     autoPlaceCities.set(name, value);
   }
+  restoredAutoBusFares = { ...(saved.autoBusFares ?? {}) };
   return true;
 }
 
@@ -476,22 +479,46 @@ function findValueControl(name: string): ValueControl | null {
   return null;
 }
 
-function saveFormState(): void {
+function readStoredFormState(store: 'sessionStorage' | 'localStorage'): SavedFormState | null {
   try {
-    localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify({
+    const raw = window[store].getItem(FORM_STORAGE_KEY);
+    return raw ? JSON.parse(raw) as SavedFormState : null;
+  } catch {
+    // 사이트 데이터가 막혀 있으면 저장소에 손대기만 해도 예외가 난다.
+    return null;
+  }
+}
+
+function saveFormState(): void {
+  let payload: string;
+  try {
+    payload = JSON.stringify({
+      autoBusFares: fareSuggestions?.getAutoAmounts() ?? {},
       autoPlaceCities: Object.fromEntries(autoPlaceCities),
       autoReturnLocations: Object.fromEntries(autoReturnLocations),
       autoTravelDates: Object.fromEntries(autoTravelDates),
       updatedAt: new Date().toISOString(),
       values: collectRawFormValues(),
-    } satisfies SavedFormState));
+    } satisfies SavedFormState);
+  } catch {
+    return;
+  }
+  try {
+    localStorage.setItem(FORM_STORAGE_KEY, payload);
   } catch {
     // Safari private mode 등 저장소를 쓸 수 없는 환경에서는 저장만 건너뛴다.
+  }
+  try {
+    sessionStorage.setItem(FORM_STORAGE_KEY, payload);
+  } catch {
+    // 탭 저장본을 못 썼으면 지난 탭 저장본이 새로고침 때 이기지 않게 지운다.
+    try { sessionStorage.removeItem(FORM_STORAGE_KEY); } catch { /* ignore */ }
   }
 }
 
 function clearSavedFormState(): void {
   try { localStorage.removeItem(FORM_STORAGE_KEY); } catch { /* ignore */ }
+  try { sessionStorage.removeItem(FORM_STORAGE_KEY); } catch { /* ignore */ }
 }
 
 function setDefaultSubmitDate(): void {
@@ -1011,7 +1038,7 @@ async function initialize(): Promise<void> {
   setupDateTimeControls();
   // 운임 제안보다 먼저 붙인다 — 갈 때 교통편·장소를 고치면 올 때 칸을 먼저 채운 뒤 두 방향 운임을 다시 계산하도록.
   setupReturnTripDefaults();
-  fareSuggestions = setupFareSuggestions(formEl);
+  fareSuggestions = setupFareSuggestions(formEl, { autoAmounts: restoredAutoBusFares });
   setupPlaceCityLookup();
   syncTemplateOnlyInputs();
   formEl.addEventListener('input', syncTemplateOnlyInputs);
@@ -1112,6 +1139,8 @@ async function initialize(): Promise<void> {
   let automaticStampTimer = 0;
   let automaticStampVersion = 0;
   let automaticStampDataUrl: string | null = null;
+  /** 「문서 삭제」로 도장을 뺐으면 다시 넣거나 초기화할 때까지 성명으로 자동 도장을 만들지 않는다 (손으로 서명하려는 경우). */
+  let stampDeclined = false;
   updateSignatureButtons();
   // refreshPreview 가 문서를 export→reload 하면 도장 배치(글 뒤로)가 풀리므로, 위치는 그대로
   // 두고 본문배치만 다시 적용한다. (realign 은 reload 직후 좌표가 틀어져 위치가 어긋난다.)
@@ -1202,36 +1231,38 @@ async function initialize(): Promise<void> {
     setStatus(statusMessage.replace('{applied}', String(applied)) + warn, missing.length > 0);
   }
 
-  function applyTravelDatesToPreview(): void {
-    const { 갈때일자, 올때일자 } = collectFormValues();
-    setFieldValues(wasm, fields, { 갈때일자, 올때일자 });
-  }
-
-  function applyReturnTripToPreview(): void {
-    const { 올때교통편, 올때출발지, 올때도착지 } = collectFormValues();
-    setFieldValues(wasm, fields, { 올때교통편, 올때출발지, 올때도착지 }, { clearEmpty: true });
-  }
+  // 양식 상태 표시(updateTemplateStatus)가 쓰는 요소 — 아래 첫 반영에서 양식이 바뀌면 바로 불리므로 먼저 찾아 둔다.
+  const templateFileInput = document.getElementById('template-file') as HTMLInputElement | null;
+  const templateResetBtn = document.getElementById('btn-template-reset') as HTMLButtonElement | null;
+  const templateStatusEl = document.getElementById('template-current');
 
   if (urlFormApplied) {
     // 공유 URL 의 의도를 한 번 더 명확히 — 폼에 반영한 값을 그대로 미리보기에 적용한다.
     applyCollectedValuesToPreview('공유 URL 의 값을 양식에 채웠습니다.');
   } else if (restoredFormState) {
     applyCollectedValuesToPreview('저장된 입력 내용을 복원했습니다.');
+  } else {
+    // 처음 열었거나 초기화 뒤에도 폼의 기본값(제출날짜·등급)과 엔진을 받는 동안 친 값을 미리보기에 넣는다.
+    applyCollectedValuesToPreview();
   }
 
-  const storedSignatureStamp = loadStoredSignatureStamp();
-  if (storedSignatureStamp) {
-    try {
-      signatureStamp.applyStored(storedSignatureStamp);
-      refreshPreviewAndRealignSignatureStamp();
-      updateSignatureButtons();
-      setStatus('브라우저에 저장된 도장/서명 이미지를 복원했습니다.');
-    } catch (err) {
-      console.warn('[web-form] 저장된 도장/서명 이미지 복원 실패:', err);
-      clearStoredSignatureStamp();
-      updateSignatureButtons();
-      setStatus('저장된 도장/서명 이미지를 불러오지 못해 저장본을 삭제했습니다.', true);
-    }
+  /** 브라우저에 저장된 도장을 문서에 넣는다 (시작할 때·초기화 뒤). 넣었으면 true, 저장본이 없으면 false. 실패하면 예외. */
+  function restoreSavedSignatureStamp(): boolean {
+    const stored = loadStoredSignatureStamp();
+    if (!stored) return false;
+    signatureStamp.applyStored(stored);
+    refreshPreviewAndRealignSignatureStamp();
+    updateSignatureButtons();
+    return true;
+  }
+
+  try {
+    if (restoreSavedSignatureStamp()) setStatus('브라우저에 저장된 도장/서명 이미지를 복원했습니다.');
+  } catch (err) {
+    console.warn('[web-form] 저장된 도장/서명 이미지 복원 실패:', err);
+    clearStoredSignatureStamp();
+    updateSignatureButtons();
+    setStatus('저장된 도장/서명 이미지를 불러오지 못해 저장본을 삭제했습니다.', true);
   }
 
   function cancelAutomaticStamp(): void {
@@ -1249,8 +1280,8 @@ async function initialize(): Promise<void> {
     window.clearTimeout(automaticStampTimer);
     const version = ++automaticStampVersion;
     const name = applicantStampName();
-    const canReplace = () => !signatureStamp.hasStamp()
-      || (automaticStampDataUrl !== null && signatureStamp.getStoredStamp()?.dataUrl === automaticStampDataUrl);
+    const canReplace = () => !stampDeclined && (!signatureStamp.hasStamp()
+      || (automaticStampDataUrl !== null && signatureStamp.getStoredStamp()?.dataUrl === automaticStampDataUrl));
     if (!canReplace()) return;
     if (!name) {
       if (automaticStampDataUrl) {
@@ -1367,19 +1398,19 @@ async function initialize(): Promise<void> {
     onReveal: revealFormControl,
     onAfterEdit: (label, value) => {
       syncFormFromInline(label, value);
-      if (label === '성명' || label === '이름') scheduleAutomaticStamp();
-      if (label === '시작일시' || label === '종료일시') {
-        applyTravelDatesToPreview();
-      }
-      if (applyReturnTripDefault(label)) {
-        applyReturnTripToPreview();
-        syncPresetChips?.();
-      }
-      if (label.endsWith('출발지') || label.endsWith('도착지') || label.endsWith('교통편')) fareSuggestions?.sync();
-      refreshPreviewAndRealignSignatureStamp();
-      fields = discoverFields(wasm);
-      saveFormState();
+      // 사이드패널에서 고친 것처럼 input 을 흘려 연동(올 때 칸·운임·지도 검색·자동 도장·빈칸 배지·임시 저장)을 그대로 탄다.
+      findValueControl(label === '이름' ? '성명' : label === '종료일시' ? '시작일시' : label)
+        ?.dispatchEvent(new Event('input', { bubbles: true }));
+      // 미리보기는 지금 한 번에 폼 값으로 다시 채운다 — 이름·성명 두 칸, 소속에 따른 양식 바꾸기, 제출날짜까지 맞춘다.
+      // ("다음"으로 열릴 칸이 이 결과를 보고 고르도록 기다리지 않고 바로 한다.)
+      window.clearTimeout(livePreviewTimer);
       setStatus(`"${label}" 항목을 반영했습니다.`);
+      try {
+        applyCollectedValuesToPreview(undefined, { clearEmpty: true });
+      } catch (err) {
+        console.error(err);
+        setStatus(`미리보기 반영 실패: ${describeError(err)}`, true);
+      }
     },
   });
 
@@ -1412,6 +1443,7 @@ async function initialize(): Promise<void> {
     options: { rotationDeg?: number } = {},
   ): Promise<void> {
     cancelAutomaticStamp();
+    stampDeclined = false;
     try {
       await signatureStamp.applyFile(file, undefined, options);
       const saveError = persistCurrentSignature();
@@ -1429,6 +1461,8 @@ async function initialize(): Promise<void> {
 
   signatureInput?.addEventListener('change', async () => {
     const file = signatureInput.files?.[0];
+    // 같은 파일을 다시 골라도 change 가 오도록 비운다 (양식 올리기 칸과 같은 방식). 읽은 File 은 그대로 쓸 수 있다.
+    signatureInput.value = '';
     if (!file) return;
     await applySignatureFile(file, '도장/서명 이미지를 성명 옆 (인)에 넣었습니다.');
   });
@@ -1467,6 +1501,7 @@ async function initialize(): Promise<void> {
   function clearSignatureFromDocument(): void {
     cancelAutomaticStamp();
     const removed = signatureStamp.clear();
+    if (removed) stampDeclined = true;
     if (signatureInput) signatureInput.value = '';
     updateSignatureButtons();
     if (removed) {
@@ -1571,9 +1606,6 @@ async function initialize(): Promise<void> {
   }
 
   // 5-1) 양식 바꾸기 — 누름틀이 든 자기 기관 HWP 를 올려 쓰거나 내장 양식으로 되돌린다.
-  const templateFileInput = document.getElementById('template-file') as HTMLInputElement | null;
-  const templateResetBtn = document.getElementById('btn-template-reset') as HTMLButtonElement | null;
-  const templateStatusEl = document.getElementById('template-current');
   /** 올린 양식에서 연결하지 못한 입력 항목 (성명·이름은 한쪽만 있어도 된다. 출장명·종료일시는 없어도 다른 칸에 들어간다) */
   function unmatchedTemplateLabels(): string[] {
     return Object.keys(FIELD_CONFIGS).filter((label) => {
@@ -1627,6 +1659,8 @@ async function initialize(): Promise<void> {
       customTemplate = candidate;
       customExpenseWritable = inspected.expenseWritable;
       await preloadFonts(inspected.fontsUsed);
+      // 글꼴을 받는 동안 되돌리기나 다른 파일 올리기를 했으면 그쪽이 이미 반영했다 — 이 파일은 저장하지 않는다.
+      if (customTemplate !== candidate) return;
       reapplyAfterTemplateSwap();
       const saved = saveCustomTemplate(candidate);
       setStatus(saved
@@ -1747,8 +1781,11 @@ async function initialize(): Promise<void> {
     // 입력 직후 초기화하면 120ms 디바운스 타이머가 옛 입력값을 다시 반영할 수 있어 먼저 취소
     window.clearTimeout(livePreviewTimer);
     cancelAutomaticStamp();
+    stampDeclined = false;
     const removedStamp = signatureStamp.clear();
     formEl.reset();
+    // reset() 은 input 이벤트를 내지 않으므로 양식별 입력(식비)·첨부서류 칩 표시를 직접 맞춘다.
+    syncTemplateOnlyInputs();
     for (const direction of ['갈때', '올때']) {
       (formEl.elements.namedItem(`${direction}운임삭제`) as HTMLInputElement).value = '0';
     }
@@ -1758,6 +1795,7 @@ async function initialize(): Promise<void> {
     autoReturnLocations.clear();
     autoPlaceCities.clear();
     fareSuggestions?.forgetAutoAmounts();
+    fareSuggestions?.clearRegionHints();
     clearSavedFormState();
     // 일시 picker 는 hidden input 의 defaultValue 가 이전 입력값으로 굳어버려 formEl.reset() 만으로는
     // 비워지지 않는다. 명시적으로 controller + attribute 를 함께 초기화한다.
@@ -1766,6 +1804,7 @@ async function initialize(): Promise<void> {
     if (signatureInput) signatureInput.value = '';
     updateSignatureButtons();
     syncPresetChips?.();
+    syncAttachmentPresetChips?.();
     fareSuggestions?.sync();
     updateRequiredBadges();
     try {
@@ -1774,7 +1813,16 @@ async function initialize(): Promise<void> {
       console.error(err);
       if (removedStamp) refreshPreview(wasm);
     }
-    setStatus('초기화했습니다.');
+    // 새로 고침한 것처럼 브라우저에 저장된 도장을 다시 넣는다 — 그러지 않으면 성명을 치자마자 자동 도장이 들어가고,
+    // 「브라우저 저장」을 누르면 저장해 둔 도장이 그것으로 덮인다. 실패해도 저장본은 지우지 않는다.
+    let restoredStamp = false;
+    try {
+      restoredStamp = restoreSavedSignatureStamp();
+    } catch (err) {
+      console.warn('[web-form] 초기화 뒤 저장된 도장 다시 넣기 실패:', err);
+      updateSignatureButtons();
+    }
+    setStatus(restoredStamp ? '초기화했습니다. 브라우저에 저장된 도장을 다시 넣었습니다.' : '초기화했습니다.');
   });
 
   /**

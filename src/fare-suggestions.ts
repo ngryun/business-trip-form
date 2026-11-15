@@ -1,6 +1,6 @@
 import { BUS_FARE_TABLE_DATE, busFareApplies, busFareLabel, findBusFares, findOfficialFares, findStopoverFares, formatWon, type BusFare, type OfficialFare, type OfficialFareData, type StopoverFareData } from './bus-fares';
 import { alternativeRegions, regionLabel, resolveFareRoute, sameNameProvinces, sameRegion, type FareRegion, type ResolvedRegion } from './fare-region';
-import { fetchLiveFares, isLiveFareEnabled, liveFareDay } from './tago-live';
+import { fetchLiveFares, isLiveFareEnabled, isPartialLiveResult, liveFareDay } from './tago-live';
 import { isTagoLimitError } from './tago-response';
 import { isPlaceLookupEnabled, lookupTerminalPoint } from './kakao-places';
 import { naverTransitUrl } from './naver-transit';
@@ -31,8 +31,18 @@ export interface FareSuggestionsHandle {
   setRegionHint(fieldName: string, value: string, region: FareRegion | null): void;
   /** 자동으로 넣은 금액 기록을 지운다 (초기화) */
   forgetAutoAmounts(): void;
+  /** 자동으로 넣은 금액 기록 (칸 이름 → 값) — 임시 저장에 함께 넣어 새로고침 뒤에도 경로를 바꾸면 새 운임으로 바꾼다 */
+  getAutoAmounts(): Record<string, string>;
+  /** 지도 검색·바꾸기 칩으로 정한 동명 지역의 시도를 잊는다 (초기화) */
+  clearRegionHints(): void;
   /** 미리보기 운임 금액 팝오버에 넣을 칩 줄 */
   popoverExtras(key: string, ctx: PopoverExtrasContext): { el: HTMLElement; cleanup: () => void } | null;
+}
+
+/** "2026-10-27" → "10/27" */
+function snapshotDate(day: string): string {
+  const match = (day ?? '').match(/^\d{4}-(\d{2})-(\d{2})$/);
+  return match ? `${Number(match[1])}/${Number(match[2])}` : day;
 }
 
 /** 칸의 지도 검색·바꾸기 칩 시도 — 칸 값이 그때와 같을 때만. 올 때 칸은 짝이 되는 갈 때 칸의 것도 본다. */
@@ -52,9 +62,15 @@ function regionHintFor(name: string, value: string): { region: FareRegion; 바�
  * 비어 있거나 전에 자동으로 채운 금액만 바꾸고, 사용자가 직접 쓴 금액은 그대로 둔다.
  * 동명 지역(강원 고성·경남 고성, 광주광역시·경기 광주)은 시도를 정해 계산하고, 짐작해 정했으면 바꾸기 칩을 보여준다.
  */
-export function setupFareSuggestions(formEl: HTMLFormElement): FareSuggestionsHandle | null {
+export function setupFareSuggestions(
+  formEl: HTMLFormElement,
+  options: { autoAmounts?: Record<string, string> } = {},
+): FareSuggestionsHandle | null {
   const wraps = [...formEl.querySelectorAll<HTMLElement>('[data-fare-suggestions]')];
   if (wraps.length === 0) return null;
+  // 저장본에서 되살린 금액 중 자동으로 넣었던 것 — 이것이 없으면 새로고침 뒤의 금액은 모두 직접 쓴 값으로 보여 경로를 바꿔도 남는다.
+  autoBusFares.clear();
+  for (const [name, value] of Object.entries(options.autoAmounts ?? {})) autoBusFares.set(name, value);
   const amountInput = (direction: string): HTMLInputElement | null => {
     const el = formEl.elements.namedItem(`${direction}금액`);
     return el instanceof HTMLInputElement ? el : null;
@@ -62,6 +78,14 @@ export function setupFareSuggestions(formEl: HTMLFormElement): FareSuggestionsHa
   const fieldValue = (name: string): string => (formEl.elements.namedItem(name) as HTMLInputElement | null)?.value ?? '';
   const setAmount = (amount: HTMLInputElement, value: string): void => {
     autoBusFares.set(amount.name, value);
+    if (amount.value === value) return;
+    amount.value = value;
+    amount.dispatchEvent(new Event('input', { bubbles: true }));
+    amount.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  /** 칩을 눌러 고른 금액 — 직접 쓴 금액처럼 다룬다 (다른 칸을 고쳐도 자동 운임으로 되돌리지 않는다). */
+  const pickAmount = (amount: HTMLInputElement, value: string): void => {
+    autoBusFares.delete(amount.name);
     if (amount.value === value) return;
     amount.value = value;
     amount.dispatchEvent(new Event('input', { bubbles: true }));
@@ -85,7 +109,9 @@ export function setupFareSuggestions(formEl: HTMLFormElement): FareSuggestionsHa
     btn.dataset.official = '';
     // 고속버스 등급 "고속" 은 일반 고속버스라 칩에는 "고속버스 일반" 으로 쓴다.
     const grade = fare.고속 ? `고속버스 ${fare.등급 === '고속' ? '일반' : fare.등급}` : fare.등급;
-    btn.textContent = `${fare.보완 ? '보완 운임' : '공식 운임'} ${grade} ${value}${differs ? ' · 요금표와 다름' : ''}`;
+    // 내장 자료(지난 조회)는 날짜를 붙여 실시간 결과와 구별한다 — 실시간 조회가 실패한 줄만 옛 값이 남는다.
+    const kind = fare.보완 ? '보완 운임' : fare.실시간 ? '공식 운임' : `공식 운임(${snapshotDate(fare.조회일 ?? OFFICIAL_FARES.조회일)} 자료)`;
+    btn.textContent = `${kind} ${grade} ${value}${differs ? ' · 요금표와 다름' : ''}`;
     const info = fare.고속 ? '고속버스정보' : '시외버스정보';
     const source = fare.보완
       ? `경유 구간 보완 요금표(관리자 입력) · ${fare.보완.출처} ${fare.조회일} 확인${fare.보완.노선 ? ` · ${fare.보완.노선}` : ''}`
@@ -96,7 +122,7 @@ export function setupFareSuggestions(formEl: HTMLFormElement): FareSuggestionsHa
     const reversed = fare.역방향 ? ' · 반대 방향 배차 기준(운임 동일)' : '';
     btn.title = `${source} · ${fare.출발}→${fare.도착} ${grade} ${value}원${range}${reversed}${differs ? '. 교육지원청 요금표와 금액이 다르니 어느 쪽을 쓸지 확인하세요.' : ''}`;
     btn.setAttribute('aria-pressed', 'false');
-    btn.addEventListener('click', () => { setAmount(amount, value); markPressed(wrap, amount); });
+    btn.addEventListener('click', () => { pickAmount(amount, value); markPressed(wrap, amount); });
     return btn;
   };
   /** 교통편이 버스가 아니면(기차/KTX·항공 …) 버스 운임은 참고용으로만 보여 주고 금액을 자동으로 넣지 않는다 — 그 안내 칩. */
@@ -179,7 +205,7 @@ export function setupFareSuggestions(formEl: HTMLFormElement): FareSuggestionsHa
           btn.textContent = index === 0 ? `요금표 ${busFareLabel(fare)}` : `${fare.행선지} ${value}`;
           btn.title = `고성교육지원청 버스요금표 ${BUS_FARE_TABLE_DATE} 기준 · ${fare.출발}→${fare.행선지} ${value}원${fare.환승 ? ` (${fare.환승})` : ''}`;
           btn.setAttribute('aria-pressed', 'false');
-          btn.addEventListener('click', () => { setAmount(amount, value); markPressed(wrap, amount); });
+          btn.addEventListener('click', () => { pickAmount(amount, value); markPressed(wrap, amount); });
           wrap.appendChild(btn);
         });
         // 공식 운임이 요금표와 다르면 경고 칩으로 함께 보여 준다 (요금표가 오래됐을 수 있으므로 비교용).
@@ -270,7 +296,10 @@ export function setupFareSuggestions(formEl: HTMLFormElement): FareSuggestionsHa
         if (live[0].요금 !== tableFares[0].요금) insert(officialChip(wrap, amount, live[0], true));
       } else {
         live.forEach((fare) => insert(officialChip(wrap, amount, fare, false)));
-        if (busFareApplies(transport) && isUntouched(amount)) setAmount(amount, formatWon(live[0].요금));
+        // 일부 터미널 조회가 실패해 일반 등급이 빠졌을 수 있으면 우등 요금을 자동으로 넣지 않는다 (칩만 보여 준다).
+        const unsure = isPartialLiveResult(live) && !live.some((fare) => fare.등급 === '일반' || fare.등급 === '고속');
+        if (unsure) liveStatus(wrap, '일부 터미널 조회 실패 · 일반 요금이 빠졌을 수 있음', '국토교통부 TAGO 조회 중 일부 터미널이 응답하지 않았습니다. 조금 뒤 출발지나 도착지를 다시 입력하면 빠진 터미널만 다시 조회합니다.');
+        else if (busFareApplies(transport) && isUntouched(amount)) setAmount(amount, formatWon(live[0].요금));
       }
       transportNote(wrap, transport);
       wrap.hidden = false;
@@ -282,13 +311,17 @@ export function setupFareSuggestions(formEl: HTMLFormElement): FareSuggestionsHa
       // 요금표 구간은 비교용이라 조용히 조회하고, 요금표에 없는 구간만 조회 중임을 보여 준다.
       if (tableFares.length === 0) liveStatus(wrap, '실시간 운임 조회 중…', '국토교통부 시외버스·고속버스정보(TAGO)에서 오늘 배차 요금을 조회하고 있습니다.');
       fetchLiveFares(from, to).then((live) => {
-        liveResults.set(routeKey, live);
+        // 일부가 실패한 결과는 기억하지 않는다 — 다음에 다시 그릴 때 빠진 터미널을 다시 조회한다.
+        if (!isPartialLiveResult(live)) liveResults.set(routeKey, live);
         if (liveTokens.get(wrap) === token) apply(live);
       }).catch((err) => {
         console.error(err);
         if (liveTokens.get(wrap) !== token) return;
         wrap.querySelectorAll('[data-live-status]').forEach((el) => el.remove());
-        if (tableFares.length === 0 && !wrap.querySelector('[data-official]')) {
+        if (tableFares.length > 0 || wrap.querySelector('[data-official]')) {
+          // 요금표·지난 자료 칩은 그대로 두되, 실시간 값이 아니라는 것은 알린다 (두 줄의 공식 운임이 달라 보일 수 있다).
+          liveStatus(wrap, isTagoLimitError(err) ? '실시간 조회 한도 초과 · 지난 자료로 표시' : '실시간 조회 실패 · 지난 자료로 표시', '국토교통부 TAGO 실시간 조회에 실패해 앱에 넣어 둔 지난 조회 자료를 보여 줍니다. 잠시 뒤 다시 입력하거나 네이버지도에서 요금을 확인하세요.');
+        } else {
           if (isTagoLimitError(err)) {
             liveStatus(wrap, '실시간 조회 한도 초과', '국토교통부 시외버스·고속버스정보(TAGO) 호출 한도에 걸렸습니다. 한도는 모든 사용자가 함께 쓰고 하루 단위로 풀립니다. 네이버지도·터미널 시간표에서 요금을 확인해 입력하세요.');
           } else {
@@ -353,6 +386,8 @@ export function setupFareSuggestions(formEl: HTMLFormElement): FareSuggestionsHa
       else placeRegionHints.delete(fieldName);
     },
     forgetAutoAmounts: () => autoBusFares.clear(),
+    getAutoAmounts: () => Object.fromEntries(autoBusFares),
+    clearRegionHints: () => placeRegionHints.clear(),
     popoverExtras,
   };
 }

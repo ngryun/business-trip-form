@@ -560,6 +560,8 @@ html, body {
   height: 100%;
   overflow: auto;
   position: relative;
+  /* 세로 스크롤바 자리를 처음부터 비워 둬 첫 화면 폭 맞춤이 스크롤바만큼 넘치지 않게 */
+  scrollbar-gutter: stable;
 }
 #scroll-content {
   position: relative;

@@ -242,11 +242,12 @@ export function openStampGenerator(opts: StampGeneratorOptions): void {
     if (!name) return;
     generateBtn.disabled = true;
     await loadStampFont(name, fontIdx());
+    if (currentDialog !== backdrop) return; // 글꼴을 받는 동안 취소했거나 새로 열었다 — 넣지 않는다
     const chosen = settings();
     drawDefaultStyledStamp(canvas, name, chosen, reroll);
     saveStampSettings(chosen);
     canvas.toBlob((blob) => {
-      if (!blob) return;
+      if (!blob || currentDialog !== backdrop) return;
       const file = new File([blob], `도장_${name}.png`, { type: 'image/png' });
       closeStampGenerator();
       opts.onGenerate(file);
