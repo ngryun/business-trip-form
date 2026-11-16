@@ -13,6 +13,12 @@ export function tripNameLine(tripName: string): string {
   return name ? `[출장명 : ${name}]` : '';
 }
 
+/**
+ * 출장명 줄 서식 — 출장지(누름틀 값)와 구분되도록 작게(10pt), 진한 회색으로.
+ * fontSize 는 HWPUNIT (1pt = 100).
+ */
+export const TRIP_NAME_LINE_FORMAT = { fontSize: 1000, textColor: '#505050', bold: false, italic: false } as const;
+
 /** 셀 문단이 이 도구가 넣은 출장명 줄(또는 빈 줄)인지 — 양식 원래 문단을 지우지 않기 위한 판별. */
 export function isTripNameLine(text: string): boolean {
   return /^\s*(\[출장명\s*:.*\]\s*)?$/.test(text ?? '');
@@ -35,6 +41,7 @@ export interface TripNameCellBridge {
   mergeParagraphInCell(sec: number, parentPara: number, ctrl: number, cell: number, cellPara: number): unknown;
   splitParagraphInCell(sec: number, parentPara: number, ctrl: number, cell: number, cellPara: number, offset: number): unknown;
   insertTextInCell(sec: number, parentPara: number, ctrl: number, cell: number, cellPara: number, offset: number, text: string): unknown;
+  applyCharFormatInCell(sec: number, parentPara: number, ctrl: number, cell: number, cellPara: number, start: number, end: number, propsJson: string): unknown;
 }
 
 /**
@@ -74,5 +81,11 @@ export function applyTripNameLine(wasm: TripNameCellBridge, placeFieldId: number
   const end = wasm.getCellParagraphLength(sec, parentPara, ctrl, idx, fieldPara);
   wasm.splitParagraphInCell(sec, parentPara, ctrl, idx, fieldPara, end);
   wasm.insertTextInCell(sec, parentPara, ctrl, idx, fieldPara + 1, 0, line);
+  // 3) 출장지와 구분되게 작고 진한 회색으로 (서식 실패는 줄 넣기를 막지 않는다).
+  try {
+    wasm.applyCharFormatInCell(sec, parentPara, ctrl, idx, fieldPara + 1, 0, line.length, JSON.stringify(TRIP_NAME_LINE_FORMAT));
+  } catch (err) {
+    console.warn('[trip-name] 출장명 줄 서식 적용 실패:', err);
+  }
   return true;
 }

@@ -32,8 +32,20 @@ function fakeCell(paragraphs) {
     mergeParagraphInCell: (s, p, c, i, cp) => { calls.push(['merge', cp]); paras[cp - 1] += paras[cp]; paras.splice(cp, 1); },
     splitParagraphInCell: (s, p, c, i, cp, off) => { calls.push(['split', cp, off]); paras.splice(cp + 1, 0, paras[cp].slice(off)); paras[cp] = paras[cp].slice(0, off); },
     insertTextInCell: (s, p, c, i, cp, off, text) => { calls.push(['insert', cp]); paras[cp] = paras[cp].slice(0, off) + text + paras[cp].slice(off); },
+    applyCharFormatInCell: (s, p, c, i, cp, start, end, json) => { calls.push(['format', cp, start, end, JSON.parse(json)]); },
   };
 }
+
+test('출장명 줄은 10pt 진한 회색으로 서식을 준다 (출장지 문단은 건드리지 않음)', () => {
+  const w = fakeCell(['강원대학교 삼척캠퍼스']);
+  applyTripNameLine(w, 7, '체육대회 지원');
+  const formats = w.calls.filter((c) => c[0] === 'format');
+  assert.equal(formats.length, 1);
+  const [, cp, start, end, props] = formats[0];
+  assert.deepEqual([cp, start, end], [1, 0, '[출장명 : 체육대회 지원]'.length]);
+  assert.equal(props.fontSize, 1000);
+  assert.equal(props.textColor, '#505050');
+});
 
 test('출장명이 있으면 누름틀 문단 뒤 새 문단에 [출장명 : …] 을 넣는다', () => {
   const w = fakeCell(['강원대학교 삼척캠퍼스']);
