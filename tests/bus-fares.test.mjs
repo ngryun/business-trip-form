@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BUS_FARES, busFareLabel, findBusFares, formatWon, normalizeFareCity } from '../src/bus-fares.ts';
 
-test('요금표 구간 수와 대표 금액 (2026. 1. 13. 기준표)', () => {
+test('요금표 구간 수와 대표 금액 (2026. 11. 13. 기준표)', () => {
   assert.equal(BUS_FARES.filter((f) => f.출발 === '고성').length, 12);
   assert.equal(BUS_FARES.filter((f) => f.출발 === '속초').length, 12);
   assert.equal(findBusFares('고성', '속초')[0].요금, 4400);
@@ -23,7 +23,7 @@ test('도시명 정규화: 공백·시/군, 간성→고성, 동서울→서울'
 
 test('반대 방향(올 때)도 같은 금액, 서울은 동서울 요금', () => {
   assert.equal(findBusFares('춘천', '고성')[0].요금, 20100);
-  assert.equal(findBusFares('서울', '고성')[0].요금, 23400);
+  assert.equal(findBusFares('서울', '고성')[0].요금, 25500);
   assert.equal(findBusFares('고성', '서울')[0].행선지, '동서울');
   assert.equal(findBusFares('속초', '서울')[0].요금, 16700);
 });
