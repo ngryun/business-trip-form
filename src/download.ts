@@ -29,8 +29,8 @@ export async function downloadHwp(wasm: WasmBridge, fileName: string): Promise<v
     a.click();
     a.remove();
   } finally {
-    // 즉시 revoke 시 일부 브라우저에서 다운로드가 끊긴다는 보고가 있어 한 박자 늦춤
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    // 일부 브라우저·앱 안 브라우저(카카오톡 등)는 '다운로드할까요?' 확인 뒤에야 파일을 읽으므로 넉넉히 둔다 (PDF 와 같은 60초).
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 }
 

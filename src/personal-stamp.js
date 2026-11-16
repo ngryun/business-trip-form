@@ -21,7 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
-/* 글씨체 목록 — 둘 다 index.html 의 Google Fonts 링크로 불러온다(OFL). 기본은 연성(배달의민족 연성체): 부드러운 붓글씨가 손도장 느낌에 맞는다. */
+/* 글씨체 목록 — 둘 다 assets/fonts 의 woff2 를 fonts.ts 가 @font-face 로 등록한다(OFL, 외부 접속 없음). 기본은 연성(배달의민족 연성체): 부드러운 붓글씨가 손도장 느낌에 맞는다. */
 export const STAMP_FONTS = Object.freeze([
   { fam: "Yeon Sung", w: 400, label: "연성 · 부드러운 붓글씨" },
   { fam: "Song Myung", w: 400, label: "송명 · 단정한 명조" },
@@ -283,7 +283,7 @@ async function ensureFont(f, sample){
   try{
     await document.fonts.load(fontSpec(f, 100), sample || '가');
     await document.fonts.load(fontSpec(f, REF), sample || '가');
-  }catch(e){ /* CDN 차단 등 — 대체 글씨체로 그린다 */ }
+  }catch(e){ /* 글꼴을 받지 못하면 대체 글씨체로 그린다 */ }
 }
 
 /* 회전된 윤곽과 최대 요철을 캔버스 안에 두어 모서리 잘림을 막는다. */

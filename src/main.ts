@@ -1,17 +1,12 @@
 import { setupFormTabs } from './form-tabs';
-import { applyExpenseFields, clearFareRows, FARE_FIELD_SUFFIXES } from './expense-fields';
+import { applyExpenseFields, clearFareRows, expenseCellsWritable, FARE_FIELD_SUFFIXES } from './expense-fields';
 import { getCellRegions, invalidateCellRegions } from './cell-fields';
-import { fetchTemplateBytes, loadTemplate } from './template-loader';
+import { createWasmBridge, documentOpenProblem, fetchTemplateBytes } from './template-loader';
 import { TEMPLATE_FILES, templateKindFor, type TemplateKind } from './template-kind';
 import { applyTripNameLine } from './trip-name';
+import { clearCustomTemplate, customTemplateProblem, loadCustomTemplate, saveCustomTemplate, type CustomTemplate } from './custom-template';
 import { applyAttachmentLines, attachmentLines, ATTACHMENT_PRESETS, hasAttachmentItem, toggleAttachmentItem } from './attachments';
-import { BUS_FARE_TABLE_DATE, busFareApplies, busFareLabel, findBusFares, findOfficialFares, findStopoverFares, formatWon, type BusFare, type OfficialFare, type OfficialFareData, type StopoverFareData } from './bus-fares';
-import { alternativeRegions, regionLabel, resolveFareRoute, sameNameProvinces, sameRegion, type FareRegion, type ResolvedRegion } from './fare-region';
-import { fetchLiveFares, isLiveFareEnabled, liveFareDay } from './tago-live';
-import tagoFaresJson from './data/tago-fares.json';
-import stopoverFaresJson from './data/stopover-fares.json';
-const OFFICIAL_FARES = tagoFaresJson as OfficialFareData;
-const STOPOVER_FARES = stopoverFaresJson as StopoverFareData;
+import { setupFareSuggestions, type FareSuggestionsHandle } from './fare-suggestions';
 import { discoverFields, fillDateTimeRange, removeDateTimeRangeSeparator, setFieldValues, setSuppressedFareGuideLabels, type FieldMap } from './field-filler';
 import { downloadHwp } from './download';
 import { mountPreview, refreshPreview, reloadPreservingScroll, setPreviewReloadHook } from './preview';
@@ -21,16 +16,16 @@ import {
   buildDateTimeRangeChrome,
   showStampPopover,
   type FareDirection,
-  type PopoverExtrasContext,
   type RangeChromeHandle,
 } from './field-popover';
 import { setupDateTimePicker, type DateTimePickerController } from './datetime-picker';
-import { SignatureStampManager, type StoredSignatureStamp } from './signature-stamp';
+import { SignatureStampManager } from './signature-stamp';
+import { clearStoredSignatureStamp, hasStoredSignatureStamp, loadStoredSignatureStamp, saveStoredSignatureStamp } from './signature-storage';
+import { setupApplicantInfoStorage } from './applicant-storage';
 import { createDefaultStamp, openStampGenerator } from './stamp-generator';
 import { printPdf, type PdfSaveResult } from './print-pdf';
 import { pushRecentValue } from './recent-values';
-import { isPlaceLookupEnabled, lookupPlaceCityLoose, lookupTerminalPoint, type PlaceCity } from './kakao-places';
-import { naverTransitUrl } from './naver-transit';
+import { isPlaceLookupEnabled, lookupPlaceCityLoose, type PlaceCity } from './kakao-places';
 import { joinCities, splitPlaces } from './place-region';
 import { defaultSubmitDate } from './date-range';
 import {
@@ -64,16 +59,8 @@ import {
 // GitHub Pages 등 하위 경로 배포 대응 — BASE_URL 기준 상대 경로
 const templateUrl = (kind: TemplateKind): string => `${import.meta.env.BASE_URL}${TEMPLATE_FILES[kind]}`;
 const FORM_STORAGE_KEY = 'business-trip-form:form-values:v1';
-const APPLICANT_STORAGE_KEY = 'business-trip-form:applicant-info:v1';
-const SIGNATURE_STORAGE_KEY = 'business-trip-form:signature-stamp:v1';
 const EDIT_HINTS_STORAGE_KEY = 'business-trip-form:edit-hints:v1';
-const APPLICANT_FIELDS = ['소속', '직급', '성명'] as const;
-const APPLICANT_DATALISTS: Record<ApplicantField, string> = {
-  소속: 'applicant-org-options',
-  직급: 'applicant-position-options',
-  성명: 'applicant-name-options',
-};
-const MAX_SAVED_APPLICANTS = 30;
+const EXTENSION_GUIDE_STORAGE_KEY = 'business-trip-form:extension-guide-hidden:v1';
 
 const statusEl = document.getElementById('status') as HTMLElement;
 const formEl = document.getElementById('trip-form') as HTMLFormElement;
@@ -81,8 +68,6 @@ const previewContainer = document.getElementById('scroll-container') as HTMLDivE
 const appBodyEl = document.querySelector('.app-body') as HTMLDivElement;
 const toggleBtn = document.getElementById('btn-toggle-panel') as HTMLButtonElement;
 const hintToggleBtn = document.getElementById('btn-toggle-hints') as HTMLButtonElement | null;
-const applicantSaveBtn = document.getElementById('btn-save-applicant') as HTMLButtonElement | null;
-const applicantClearBtn = document.getElementById('btn-clear-applicants') as HTMLButtonElement | null;
 const signatureInput = document.getElementById('signature-image') as HTMLInputElement | null;
 const signatureRotateBtn = document.getElementById('btn-rotate-signature') as HTMLButtonElement | null;
 /** 앱이 만든 도장(자동 생성·도장 만들기)의 기본 기울기. 손으로 찍은 듯 보이도록 살짝 기울인다. */
@@ -97,9 +82,11 @@ const TRAVEL_DATE_DEFAULTS: Record<string, string> = {
   시작일시: '갈때일자',
   종료일시: '올때일자',
 };
-const RETURN_LOCATION_DEFAULTS: Record<string, string> = {
+/** 갈 때 값으로 채우는 올 때 칸 — 출발지·도착지는 거꾸로, 교통편은 그대로 (대개 같은 교통편으로 돌아온다). */
+const RETURN_TRIP_DEFAULTS: Record<string, string> = {
   갈때출발지: '올때도착지',
   갈때도착지: '올때출발지',
+  갈때교통편: '올때교통편',
 };
 /** 지도 검색으로 도시명을 찾아 채울 곳 — 소속은 갈 때 출발지, 출장지는 갈 때 도착지 (올 때는 위 규칙이 거꾸로 채운다) */
 const PLACE_CITY_DEFAULTS: Record<string, string> = {
@@ -114,14 +101,10 @@ const autoTravelDates = new Map<string, string>();
 const autoReturnLocations = new Map<string, string>();
 /** 지도 검색으로 채운 출발지·도착지 값 — 사용자가 직접 고친 값은 덮어쓰지 않으려고 기억한다. */
 const autoPlaceCities = new Map<string, string>();
-/** 지도 검색·바꾸기 칩으로 정한 출발지·도착지의 시도 (칸 이름 → 그때의 칸 값·지역). 칸 값이 같을 때만 쓴다. */
-const placeRegionHints = new Map<string, { value: string; region: FareRegion; 바꿈?: boolean }>();
-/** 올 때 칸은 갈 때 칸을 거꾸로 받아 오므로, 값이 같으면 그쪽에서 정한 시도를 따른다. */
-const RETURN_REGION_SOURCES: Record<string, string> = { 올때출발지: '갈때도착지', 올때도착지: '갈때출발지' };
-const LIVE_FARE_DELAY_MS = 600;
-/** 요금표로 자동으로 채운 운임 금액 (input name → 값). 사용자가 직접 고친 금액은 덮어쓰지 않기 위해 기억한다. */
-const autoBusFares = new Map<string, string>();
-let syncBusFares: (() => void) | null = null;
+/** 저장본에서 읽은 자동 운임 금액 — 운임 제안을 붙인 뒤 넘겨준다 (restoreFormState 가 먼저 돈다). */
+let restoredAutoBusFares: Record<string, string> = {};
+/** 운임 탭의 금액 제안 칩 (fare-suggestions.ts) — 설정 전에는 null */
+let fareSuggestions: FareSuggestionsHandle | null = null;
 let liveDateTimePreviewHandler: (() => void) | null = null;
 /** 인라인 편집 핸들 — 편집 가능 칸 마커 갱신/토글에 쓴다 (부착 전에는 null). */
 let inlineEdit: InlineEditHandle | null = null;
@@ -145,6 +128,8 @@ interface PreviewApplyOptions {
 }
 
 interface SavedFormState {
+  /** 운임 칩이 자동으로 넣은 금액 — 새로고침 뒤에도 경로를 바꾸면 새 운임으로 바뀌게 기억한다. */
+  autoBusFares?: Record<string, string>;
   autoPlaceCities?: Record<string, string>;
   autoReturnLocations?: Record<string, string>;
   autoTravelDates?: Record<string, string>;
@@ -152,8 +137,6 @@ interface SavedFormState {
   values?: Record<string, string>;
 }
 
-type ApplicantField = typeof APPLICANT_FIELDS[number];
-type SavedApplicantInfo = Record<ApplicantField, string> & { updatedAt: string };
 
 let statusHideTimer = 0;
 
@@ -172,17 +155,27 @@ function setStatus(message: string, isError = false): void {
   );
 }
 
-/** 지금 소속에 맞는 양식 (태백교육지원청이면 태백 양식) */
-function currentTemplateKind(): TemplateKind {
+/** 지금 쓰는 양식 — 내장 양식 둘 중 하나, 또는 사용자가 올린 양식 */
+type ActiveTemplate = TemplateKind | 'custom';
+
+/** 사용자가 올린 양식 (없으면 소속에 맞는 내장 양식을 쓴다) */
+let customTemplate: CustomTemplate | null = null;
+/** 올린 양식의 표가 기본 양식과 같은 구조라 일반 칸(식비·동승자·등급·금액)에 값을 써도 되는지 */
+let customExpenseWritable = false;
+
+/** 지금 쓸 양식 — 올린 양식이 있으면 그것, 없으면 소속에 맞는 양식 (태백교육지원청이면 태백 양식) */
+function currentTemplateKind(): ActiveTemplate {
+  if (customTemplate) return 'custom';
   const org = formEl.elements.namedItem('소속');
   return templateKindFor(org instanceof HTMLInputElement ? org.value : '');
 }
 
-/** 한 양식에만 있는 입력(예: 태백 양식의 출장명)은 그 양식일 때만 보인다. */
+/** 한 양식에만 있는 입력(예: 기본 양식의 식비)은 그 양식일 때만 보인다. 올린 양식은 기본 양식과 같은 입력을 보여 준다. */
 function syncTemplateOnlyInputs(): void {
   const kind = currentTemplateKind();
+  const shown = kind === 'custom' ? 'default' : kind;
   formEl.querySelectorAll<HTMLElement>('[data-template-only]').forEach((el) => {
-    el.hidden = el.dataset.templateOnly !== kind;
+    el.hidden = el.dataset.templateOnly !== shown;
   });
 }
 
@@ -201,7 +194,7 @@ function collectFormValues(): Record<string, string> {
   }
   const startDateTime = raw.시작일시 ?? '';
   const endDateTime = raw.종료일시 ?? '';
-  const kind = templateKindFor(raw.소속 ?? '');
+  const kind = currentTemplateKind();
   return {
     소속: raw.소속 ?? '',
     직급: raw.직급 ?? '',
@@ -211,6 +204,7 @@ function collectFormValues(): Record<string, string> {
     시작일시: formatDateTimeRange(startDateTime, endDateTime),
     출장지: raw.출장지 ?? '',
     // 출장명 누름틀은 태백 양식에만 있다. 기본 양식은 applyTripNameLine 이 출장지 셀 아래 줄에 넣는다.
+    // (올린 양식은 출장명 누름틀이 있는지에 따라 applyCollectedValuesToPreview 가 정한다.)
     ...(kind === 'taebaek' ? { 출장명: raw.출장명 ?? '' } : {}),
     갈때일자: formatDateKR(raw.갈때일자 ?? ''),
     갈때교통편: raw.갈때교통편 ?? '',
@@ -425,118 +419,6 @@ function confirmMissingRequired(actionLabel: string): boolean {
   return ok;
 }
 
-function setupApplicantInfoStorage(): void {
-  refreshApplicantDatalists();
-  applicantSaveBtn?.addEventListener('click', () => {
-    const info = collectApplicantInfo();
-    if (!info) {
-      setStatus('저장할 신청자 정보를 입력하세요.', true);
-      return;
-    }
-
-    const saved = loadApplicantInfos();
-    const next = [
-      info,
-      ...saved.filter((item) => !isSameApplicantInfo(item, info)),
-    ].slice(0, MAX_SAVED_APPLICANTS);
-
-    try {
-      localStorage.setItem(APPLICANT_STORAGE_KEY, JSON.stringify(next));
-    } catch {
-      setStatus('브라우저 저장소를 사용할 수 없어 신청자 정보를 저장하지 못했습니다.', true);
-      return;
-    }
-
-    refreshApplicantDatalists(next);
-    saveFormState();
-    setStatus('신청자 정보를 브라우저에 저장했습니다.');
-  });
-
-  applicantClearBtn?.addEventListener('click', () => {
-    if (!window.confirm('브라우저에 저장된 신청자 정보 목록을 모두 삭제할까요?')) return;
-    try {
-      localStorage.removeItem(APPLICANT_STORAGE_KEY);
-    } catch {
-      setStatus('브라우저 저장소를 사용할 수 없어 저장 목록을 삭제하지 못했습니다.', true);
-      return;
-    }
-
-    refreshApplicantDatalists([]);
-    setStatus('저장된 신청자 정보 목록을 모두 삭제했습니다.');
-  });
-}
-
-function collectApplicantInfo(): SavedApplicantInfo | null {
-  const values = Object.fromEntries(
-    APPLICANT_FIELDS.map((name) => [name, getApplicantInput(name)?.value.trim() ?? '']),
-  ) as Record<ApplicantField, string>;
-  if (!APPLICANT_FIELDS.some((name) => values[name])) return null;
-  return { ...values, updatedAt: new Date().toISOString() };
-}
-
-function getApplicantInput(name: ApplicantField): HTMLInputElement | null {
-  const control = formEl.elements.namedItem(name);
-  return control instanceof HTMLInputElement ? control : null;
-}
-
-function loadApplicantInfos(): SavedApplicantInfo[] {
-  try {
-    const raw = localStorage.getItem(APPLICANT_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) as unknown : [];
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map(normalizeApplicantInfo)
-      .filter((item): item is SavedApplicantInfo => item !== null);
-  } catch {
-    return [];
-  }
-}
-
-function normalizeApplicantInfo(raw: unknown): SavedApplicantInfo | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const item = raw as Partial<Record<ApplicantField | 'updatedAt', unknown>>;
-  const values = Object.fromEntries(
-    APPLICANT_FIELDS.map((name) => [name, typeof item[name] === 'string' ? item[name].trim() : '']),
-  ) as Record<ApplicantField, string>;
-  if (!APPLICANT_FIELDS.some((name) => values[name])) return null;
-  return {
-    ...values,
-    updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : '',
-  };
-}
-
-function refreshApplicantDatalists(applicants = loadApplicantInfos()): void {
-  // 지울 목록이 없으면 파괴적 버튼을 아예 보이지 않게 한다
-  if (applicantClearBtn) applicantClearBtn.hidden = applicants.length === 0;
-  for (const field of APPLICANT_FIELDS) {
-    const datalist = document.getElementById(APPLICANT_DATALISTS[field]) as HTMLDataListElement | null;
-    if (!datalist) continue;
-    datalist.replaceChildren(
-      ...uniqueApplicantValues(applicants, field).map((value) => {
-        const option = document.createElement('option');
-        option.value = value;
-        return option;
-      }),
-    );
-  }
-}
-
-function uniqueApplicantValues(applicants: SavedApplicantInfo[], field: ApplicantField): string[] {
-  const seen = new Set<string>();
-  const values: string[] = [];
-  for (const item of applicants) {
-    const value = item[field].trim();
-    if (!value || seen.has(value)) continue;
-    seen.add(value);
-    values.push(value);
-  }
-  return values;
-}
-
-function isSameApplicantInfo(a: SavedApplicantInfo, b: SavedApplicantInfo): boolean {
-  return APPLICANT_FIELDS.every((field) => a[field] === b[field]);
-}
-
 /**
  * 링크(확장프로그램·「URL 공유」)로 새 출장을 열 때 저장본에서 이어 쓰는 칸 — 신청인 정보와 매번 같기 쉬운 선택.
  * 나머지(출장지·일시·운임·식비·동승자·첨부서류·제출날짜·운임 행 삭제)는 출장마다 달라 빈 칸에서 시작한다.
@@ -548,13 +430,10 @@ const URL_CARRY_OVER_KEYS: ReadonlySet<string> = new Set(['소속', '직급', '�
  * 링크로 연 새 출장에 지난 출장의 값이 섞여 빈칸 확인에도 걸리지 않은 채 찍히던 문제를 막는다.
  */
 function restoreFormState(keepOnly?: ReadonlySet<string>): boolean {
-  let saved: SavedFormState | null = null;
-  try {
-    const raw = localStorage.getItem(FORM_STORAGE_KEY);
-    saved = raw ? JSON.parse(raw) as SavedFormState : null;
-  } catch {
-    return false;
-  }
+  // 이 탭의 저장본(sessionStorage)이 먼저다 — 여러 출장을 탭마다 열어 두고 한 탭을 새로고침해도
+  // 다른 탭에서 마지막으로 고친 출장으로 바뀌지 않는다. 링크로 연 새 출장(keepOnly)과 새 탭은 공용 저장본을 쓴다.
+  const tab = keepOnly ? null : readStoredFormState('sessionStorage');
+  const saved = tab?.values ? tab : readStoredFormState('localStorage');
   if (!saved?.values) return false;
 
   for (const [name, value] of Object.entries(saved.values)) {
@@ -566,6 +445,7 @@ function restoreFormState(keepOnly?: ReadonlySet<string>): boolean {
   autoTravelDates.clear();
   autoReturnLocations.clear();
   autoPlaceCities.clear();
+  restoredAutoBusFares = {};
   if (keepOnly) return true;
   for (const [name, value] of Object.entries(saved.autoTravelDates ?? {})) {
     autoTravelDates.set(name, value);
@@ -576,6 +456,7 @@ function restoreFormState(keepOnly?: ReadonlySet<string>): boolean {
   for (const [name, value] of Object.entries(saved.autoPlaceCities ?? {})) {
     autoPlaceCities.set(name, value);
   }
+  restoredAutoBusFares = { ...(saved.autoBusFares ?? {}) };
   return true;
 }
 
@@ -598,100 +479,46 @@ function findValueControl(name: string): ValueControl | null {
   return null;
 }
 
-function saveFormState(): void {
+function readStoredFormState(store: 'sessionStorage' | 'localStorage'): SavedFormState | null {
   try {
-    localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify({
+    const raw = window[store].getItem(FORM_STORAGE_KEY);
+    return raw ? JSON.parse(raw) as SavedFormState : null;
+  } catch {
+    // 사이트 데이터가 막혀 있으면 저장소에 손대기만 해도 예외가 난다.
+    return null;
+  }
+}
+
+function saveFormState(): void {
+  let payload: string;
+  try {
+    payload = JSON.stringify({
+      autoBusFares: fareSuggestions?.getAutoAmounts() ?? {},
       autoPlaceCities: Object.fromEntries(autoPlaceCities),
       autoReturnLocations: Object.fromEntries(autoReturnLocations),
       autoTravelDates: Object.fromEntries(autoTravelDates),
       updatedAt: new Date().toISOString(),
       values: collectRawFormValues(),
-    } satisfies SavedFormState));
+    } satisfies SavedFormState);
+  } catch {
+    return;
+  }
+  try {
+    localStorage.setItem(FORM_STORAGE_KEY, payload);
   } catch {
     // Safari private mode 등 저장소를 쓸 수 없는 환경에서는 저장만 건너뛴다.
+  }
+  try {
+    sessionStorage.setItem(FORM_STORAGE_KEY, payload);
+  } catch {
+    // 탭 저장본을 못 썼으면 지난 탭 저장본이 새로고침 때 이기지 않게 지운다.
+    try { sessionStorage.removeItem(FORM_STORAGE_KEY); } catch { /* ignore */ }
   }
 }
 
 function clearSavedFormState(): void {
   try { localStorage.removeItem(FORM_STORAGE_KEY); } catch { /* ignore */ }
-}
-
-function loadStoredSignatureStamp(): StoredSignatureStamp | null {
-  try {
-    const raw = localStorage.getItem(SIGNATURE_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) as unknown : null;
-    return normalizeStoredSignatureStamp(parsed);
-  } catch {
-    return null;
-  }
-}
-
-function saveStoredSignatureStamp(stamp: StoredSignatureStamp): { ok: true } | { ok: false; reason: string } {
-  const payload = JSON.stringify({
-    ...stamp,
-    updatedAt: new Date().toISOString(),
-  } satisfies StoredSignatureStamp);
-  try {
-    localStorage.setItem(SIGNATURE_STORAGE_KEY, payload);
-    return { ok: true };
-  } catch (err) {
-    console.error('[signature] localStorage 저장 실패', err);
-    const sizeKb = Math.round(payload.length / 1024);
-    const quotaLike =
-      (err instanceof DOMException &&
-        (err.name === 'QuotaExceededError' || err.code === 22 || err.code === 1014)) ||
-      /quota/i.test(String((err as { message?: unknown })?.message ?? ''));
-    if (quotaLike) {
-      return {
-        ok: false,
-        reason: `브라우저 저장 용량 부족(${sizeKb}KB). 이미지를 좀 더 작게 만들어 다시 시도해 주세요.`,
-      };
-    }
-    const detail = err instanceof Error ? err.message : String(err);
-    return { ok: false, reason: `브라우저 저장 실패: ${detail || '알 수 없는 오류'}` };
-  }
-}
-
-function clearStoredSignatureStamp(): boolean {
-  try {
-    localStorage.removeItem(SIGNATURE_STORAGE_KEY);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function hasStoredSignatureStamp(): boolean {
-  try {
-    return localStorage.getItem(SIGNATURE_STORAGE_KEY) !== null;
-  } catch {
-    return false;
-  }
-}
-
-function normalizeStoredSignatureStamp(raw: unknown): StoredSignatureStamp | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const item = raw as Partial<StoredSignatureStamp>;
-  if (
-    item.mime !== 'image/png' ||
-    typeof item.dataUrl !== 'string' ||
-    !item.dataUrl.startsWith('data:image/png;base64,') ||
-    typeof item.widthPx !== 'number' ||
-    typeof item.heightPx !== 'number'
-  ) {
-    return null;
-  }
-  const rotationDeg = typeof item.rotationDeg === 'number'
-    ? Math.min(10, Math.max(0, Math.round(item.rotationDeg)))
-    : 0;
-  return {
-    mime: 'image/png',
-    dataUrl: item.dataUrl,
-    widthPx: Math.max(1, Math.round(item.widthPx)),
-    heightPx: Math.max(1, Math.round(item.heightPx)),
-    updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : '',
-    ...(rotationDeg > 0 ? { rotationDeg } : {}),
-  };
+  try { sessionStorage.removeItem(FORM_STORAGE_KEY); } catch { /* ignore */ }
 }
 
 function setDefaultSubmitDate(): void {
@@ -831,6 +658,28 @@ function setupPanelToggle(): void {
   syncAria();
 }
 
+/**
+ * 크롬 확장프로그램 안내 — 「안내 닫기」를 누르면 이 브라우저에서는 다시 보이지 않는다.
+ * 확장프로그램이 넘긴 링크로 열었으면 이미 설치한 사람이므로 처음부터 감춘다.
+ * (휴대폰·태블릿은 확장프로그램을 설치할 수 없어 CSS 가 감춘다.)
+ */
+function setupExtensionGuide(openedByExtension: boolean): void {
+  const guide = document.querySelector<HTMLElement>('.extension-guide');
+  if (!guide) return;
+  const hide = (): void => {
+    guide.hidden = true;
+    try {
+      localStorage.setItem(EXTENSION_GUIDE_STORAGE_KEY, '1');
+    } catch { /* 저장소를 못 쓰면 이번 방문에만 감춘다 */ }
+  };
+  let dismissed = false;
+  try {
+    dismissed = localStorage.getItem(EXTENSION_GUIDE_STORAGE_KEY) === '1';
+  } catch { /* 저장소를 못 쓰면 안내를 보인다 */ }
+  if (dismissed || openedByExtension) hide();
+  document.getElementById('btn-hide-extension-guide')?.addEventListener('click', hide);
+}
+
 function setupDateTimeControls(): void {
   const startControl = formEl.querySelector<HTMLElement>('[data-datetime-picker="시작일시"]');
   const endControl = formEl.querySelector<HTMLElement>('[data-datetime-picker="종료일시"]');
@@ -880,324 +729,13 @@ function setupDateTimeControls(): void {
   document.getElementById('datetime-range')?.appendChild(dateTimeRangeChrome.root);
 }
 
-/** 칸의 지도 검색·바꾸기 칩 시도 — 칸 값이 그때와 같을 때만. 올 때 칸은 짝이 되는 갈 때 칸의 것도 본다. */
-function regionHintFor(name: string, value: string): { region: FareRegion; 바꿈?: boolean } | null {
-  const text = value.trim();
-  for (const key of [name, RETURN_REGION_SOURCES[name]]) {
-    const hint = key ? placeRegionHints.get(key) : undefined;
-    if (hint && hint.value === text) return hint;
-  }
-  return null;
-}
-
-/** "경남 고성" → "경남 고성으로", "광주광역시" → "광주광역시로" (받침 없거나 ㄹ 받침이면 "로"). */
-function withEuro(word: string): string {
-  const code = word.charCodeAt(word.length - 1) - 0xac00;
-  if (code < 0 || code > 11171) return `${word}(으)로`;
-  const final = code % 28;
-  return `${word}${final === 0 || final === 8 ? '로' : '으로'}`;
-}
-
-/**
- * 출발지·도착지가 고성교육지원청 버스요금표(2026. 1. 13.)의 구간과 맞으면 금액을 자동으로 채우고,
- * 금액 칸 아래에 후보 칩(같은 도시의 다른 정류장 포함)을 보여준다.
- * 표에 없는 구간은 TAGO 공식 운임(내장 자료, 이어서 실시간 조회)을 제안한다. 네이버지도 길찾기 링크는 구간마다 둔다.
- * 비어 있거나 전에 자동으로 채운 금액만 바꾸고, 사용자가 직접 쓴 금액은 그대로 둔다.
- * 동명 지역(강원 고성·경남 고성, 광주광역시·경기 광주)은 시도를 정해 계산하고, 짐작해 정했으면 바꾸기 칩을 보여준다.
- */
-function setupBusFareSuggestions(): void {
-  const wraps = [...formEl.querySelectorAll<HTMLElement>('[data-fare-suggestions]')];
-  if (wraps.length === 0) return;
-  const amountInput = (direction: string): HTMLInputElement | null => {
-    const el = formEl.elements.namedItem(`${direction}금액`);
-    return el instanceof HTMLInputElement ? el : null;
-  };
-  const fieldValue = (name: string): string => (formEl.elements.namedItem(name) as HTMLInputElement | null)?.value ?? '';
-  const setAmount = (amount: HTMLInputElement, value: string): void => {
-    autoBusFares.set(amount.name, value);
-    if (amount.value === value) return;
-    amount.value = value;
-    amount.dispatchEvent(new Event('input', { bubbles: true }));
-    amount.dispatchEvent(new Event('change', { bubbles: true }));
-  };
-  const isUntouched = (amount: HTMLInputElement): boolean =>
-    !amount.value.trim() || amount.value === autoBusFares.get(amount.name);
-  const markPressed = (wrap: HTMLElement, amount: HTMLInputElement): void => {
-    wrap.querySelectorAll<HTMLButtonElement>('button[data-amount]').forEach((chip) => {
-      const active = chip.dataset.amount === amount.value.trim();
-      chip.classList.toggle('is-active', active);
-      chip.setAttribute('aria-pressed', String(active));
-    });
-  };
-  const officialChip = (wrap: HTMLElement, amount: HTMLInputElement, fare: OfficialFare, differs: boolean): HTMLButtonElement => {
-    const value = formatWon(fare.요금);
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = differs ? 'attachment-preset-chip attachment-preset-chip--warn' : 'attachment-preset-chip';
-    btn.dataset.amount = value;
-    btn.dataset.official = '';
-    // 고속버스 등급 "고속" 은 일반 고속버스라 칩에는 "고속버스 일반" 으로 쓴다.
-    const grade = fare.고속 ? `고속버스 ${fare.등급 === '고속' ? '일반' : fare.등급}` : fare.등급;
-    btn.textContent = `${fare.보완 ? '보완 운임' : '공식 운임'} ${grade} ${value}${differs ? ' · 요금표와 다름' : ''}`;
-    const info = fare.고속 ? '고속버스정보' : '시외버스정보';
-    const source = fare.보완
-      ? `경유 구간 보완 요금표(관리자 입력) · ${fare.보완.출처} ${fare.조회일} 확인${fare.보완.노선 ? ` · ${fare.보완.노선}` : ''}`
-      : fare.실시간
-        ? `국토교통부 ${info}(TAGO) 실시간 조회 · ${fare.조회일} 배차 기준`
-        : `국토교통부 ${info}(TAGO) ${fare.조회일 ?? OFFICIAL_FARES.조회일} 조회`;
-    const range = fare.최고 ? ` (배차·터미널에 따라 ${value}~${formatWon(fare.최고)}원)` : '';
-    const reversed = fare.역방향 ? ' · 반대 방향 배차 기준(운임 동일)' : '';
-    btn.title = `${source} · ${fare.출발}→${fare.도착} ${grade} ${value}원${range}${reversed}${differs ? '. 교육지원청 요금표와 금액이 다르니 어느 쪽을 쓸지 확인하세요.' : ''}`;
-    btn.setAttribute('aria-pressed', 'false');
-    btn.addEventListener('click', () => { setAmount(amount, value); markPressed(wrap, amount); });
-    return btn;
-  };
-  /** 교통편이 버스가 아니면(기차/KTX·항공 …) 버스 운임은 참고용으로만 보여 주고 금액을 자동으로 넣지 않는다 — 그 안내 칩. */
-  const transportNote = (wrap: HTMLElement, transport: string): void => {
-    if (busFareApplies(transport) || !wrap.querySelector('button[data-amount]') || wrap.querySelector('[data-transport-note]')) return;
-    const note = document.createElement('span');
-    note.className = 'attachment-preset-chip attachment-preset-chip--status';
-    note.dataset.transportNote = '';
-    note.textContent = `교통편 ${transport.trim()} · 버스 운임은 참고용 (자동 입력 안 함)`;
-    note.title = `교통편이 "${transport.trim()}"이라 버스 운임을 금액에 자동으로 넣지 않습니다. 실제 지불한 운임을 입력하세요. 칩을 누르면 그 금액이 들어갑니다.`;
-    wrap.prepend(note);
-    wrap.hidden = false;
-  };
-  /**
-   * 동명 지역을 짐작해 정한 칸이면 "경남 고성으로 바꾸기" 칩 — 누르면 그 칸의 시도를 기억하고 다시 계산한다.
-   * 칩으로 바꾼 칸은 되돌릴 수 있게 계속 보여 준다 (지도 검색으로 정한 칸은 보여 주지 않는다).
-   */
-  const regionSwitchChips = (fieldName: string, label: string, region: ResolvedRegion | null, switched: boolean): HTMLButtonElement[] => {
-    if (!region || !(region.추정 || switched)) return [];
-    return alternativeRegions(region).map((alt) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'attachment-preset-chip attachment-preset-chip--region';
-      btn.dataset.regionSwitch = '';
-      btn.textContent = `${label} ${regionLabel(region)} 기준 · ${withEuro(regionLabel(alt))} 바꾸기`;
-      btn.title = `${label} "${region.시군}"은(는) 같은 이름의 지역이 있어 ${withEuro(regionLabel(region))} 보고 계산했습니다. ${regionLabel(alt)}이면 누르세요.`;
-      btn.addEventListener('click', () => {
-        placeRegionHints.set(fieldName, { value: fieldValue(fieldName).trim(), region: alt, 바꿈: true });
-        sync();
-      });
-      return btn;
-    });
-  };
-  const sync = (): void => {
-    for (const wrap of wraps) {
-      const direction = wrap.dataset.fareSuggestions ?? '';
-      const amount = amountInput(direction);
-      if (!amount) continue;
-      const fromName = `${direction}출발지`;
-      const toName = `${direction}도착지`;
-      const from = fieldValue(fromName);
-      const to = fieldValue(toName);
-      const fromHint = regionHintFor(fromName, from);
-      const toHint = regionHintFor(toName, to);
-      const route = resolveFareRoute(from, to, { from: fromHint?.region, to: toHint?.region });
-      const fares = findBusFares(route.from, route.to);
-      // TAGO 에 없는 경유 구간(중간 정차)은 관리자가 채운 보완 요금표로 메운다.
-      const tagoFares = findOfficialFares(route.from, route.to, OFFICIAL_FARES);
-      const official = tagoFares.length ? tagoFares : findStopoverFares(route.from, route.to, STOPOVER_FARES);
-      const transport = fieldValue(`${direction}교통편`);
-      const autoFill = busFareApplies(transport);
-      const previousAuto = autoBusFares.get(amount.name);
-      // 교통편을 기차/KTX 등으로 바꾸면, 버스 운임으로 자동 입력했던 금액은 비운다 (직접 쓴 금액은 그대로).
-      if (!autoFill && previousAuto !== undefined && amount.value === previousAuto) {
-        setAmount(amount, '');
-        autoBusFares.delete(amount.name);
-      }
-      const untouched = autoFill && isUntouched(amount);
-      wrap.replaceChildren();
-      if (fares.length === 0) {
-        // 요금표에 없는 구간: 공식 운임이 있으면 그것을 제안하고, 없으면 자동으로 채웠던 금액만 비운다.
-        if (official.length > 0) {
-          official.forEach((fare) => wrap.appendChild(officialChip(wrap, amount, fare, false)));
-          if (untouched) setAmount(amount, formatWon(official[0].요금));
-        } else {
-          if (previousAuto !== undefined && amount.value === previousAuto) setAmount(amount, '');
-          autoBusFares.delete(amount.name);
-        }
-      } else {
-        fares.forEach((fare, index) => {
-          const value = formatWon(fare.요금);
-          const btn = document.createElement('button');
-          btn.type = 'button';
-          btn.className = 'attachment-preset-chip';
-          btn.dataset.amount = value;
-          btn.textContent = index === 0 ? `요금표 ${busFareLabel(fare)}` : `${fare.행선지} ${value}`;
-          btn.title = `고성교육지원청 버스요금표 ${BUS_FARE_TABLE_DATE} 기준 · ${fare.출발}→${fare.행선지} ${value}원${fare.환승 ? ` (${fare.환승})` : ''}`;
-          btn.setAttribute('aria-pressed', 'false');
-          btn.addEventListener('click', () => { setAmount(amount, value); markPressed(wrap, amount); });
-          wrap.appendChild(btn);
-        });
-        // 공식 운임이 요금표와 다르면 경고 칩으로 함께 보여 준다 (요금표가 오래됐을 수 있으므로 비교용).
-        const representative = official[0];
-        if (representative && representative.요금 !== fares[0].요금) wrap.appendChild(officialChip(wrap, amount, representative, true));
-        if (untouched) setAmount(amount, formatWon(fares[0].요금));
-      }
-      [...regionSwitchChips(fromName, '출발지', route.from, fromHint?.바꿈 ?? false), ...regionSwitchChips(toName, '도착지', route.to, toHint?.바꿈 ?? false)]
-        .forEach((chip) => wrap.appendChild(chip));
-      transportNote(wrap, transport);
-      wrap.hidden = wrap.childElementCount === 0;
-      markPressed(wrap, amount);
-      // 요금표·공식 운임이 있어도 네이버지도에서 맞춰 볼 수 있게 링크는 늘 둔다
-      renderNaverLink(wrap, route.from, route.to);
-      renderLiveFares(wrap, amount, route, fares, transport);
-    }
-  };
-  /** 출발·도착 터미널 좌표를 찾아 네이버지도 대중교통 길찾기 링크를 보여준다. 늦게 온 앞 구간의 결과는 버린다. */
-  const linkTokens = new Map<HTMLElement, number>();
-  const renderNaverLink = (wrap: HTMLElement, from: FareRegion | null, to: FareRegion | null): void => {
-    const token = (linkTokens.get(wrap) ?? 0) + 1;
-    linkTokens.set(wrap, token);
-    if (!isPlaceLookupEnabled() || !from || !to || sameRegion(from, to)) return;
-    // 동명 지역만 시도를 붙여 찾는다 ("경남 고성 시외버스터미널"). 광주광역시는 "광주" 만으로 찾힌다.
-    const province = (r: FareRegion): string => (sameNameProvinces(r.시군).length > 0 && r.시도 !== r.시군 ? r.시도 : '');
-    void Promise.all([lookupTerminalPoint(from.시군, province(from)), lookupTerminalPoint(to.시군, province(to))]).then(([start, goal]) => {
-      if (linkTokens.get(wrap) !== token || !start || !goal) return;
-      const link = document.createElement('a');
-      link.className = 'attachment-preset-chip attachment-preset-chip--link';
-      link.href = naverTransitUrl(start, goal);
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      link.textContent = '네이버지도에서 요금 확인 ↗';
-      link.title = `${start.name} → ${goal.name} 대중교통 길찾기. 시외버스 최소요금을 확인해 금액에 입력하세요.`;
-      wrap.querySelectorAll('a').forEach((old) => old.remove());
-      wrap.appendChild(link);
-      wrap.hidden = false;
-    }).catch((err) => console.error(err));
-  };
-  /**
-   * 실시간 공식 운임: 입력이 멈추면 TAGO 를 조회해 내장 자료의 공식 운임 칩을 오늘 배차 기준 값으로 바꾼다.
-   * 요금표 구간이면 금액이 다를 때만 경고 칩, 요금표에 없는 구간이면 금액도 자동으로 채운다. 실패하면 내장 자료를 그대로 둔다.
-   * 요금표에 없는 구간은 조회하는 동안 "실시간 운임 조회 중…", 시외·고속버스 모두 배차가 없고 보완 요금표에도 없으면 "운임 정보 없음" 을 보여 준다 (경유 구간일 수 있다).
-   */
-  const liveTokens = new Map<HTMLElement, number>();
-  const liveTimers = new Map<HTMLElement, number>();
-  /** 이번 페이지에서 조회를 마친 구간 (시도 시군>시도 시군:날짜 → 결과) — 다시 그릴 때 "조회 중" 을 거치지 않고 바로 보여 준다 */
-  const liveResults = new Map<string, OfficialFare[]>();
-  /** 운임 칩 사이에 넣는 안내 문구 (조회 중·직행 노선 없음) — 누를 수 없는 칩 */
-  const liveStatus = (wrap: HTMLElement, text: string, title: string): void => {
-    wrap.querySelectorAll('[data-live-status]').forEach((el) => el.remove());
-    const note = document.createElement('span');
-    note.className = 'attachment-preset-chip attachment-preset-chip--status';
-    note.dataset.liveStatus = '';
-    note.textContent = text;
-    note.title = title;
-    wrap.insertBefore(note, wrap.querySelector('[data-region-switch], a'));
-    wrap.hidden = false;
-  };
-  const renderLiveFares = (
-    wrap: HTMLElement,
-    amount: HTMLInputElement,
-    route: { from: FareRegion | null; to: FareRegion | null },
-    tableFares: BusFare[],
-    transport: string,
-  ): void => {
-    const token = (liveTokens.get(wrap) ?? 0) + 1;
-    liveTokens.set(wrap, token);
-    window.clearTimeout(liveTimers.get(wrap));
-    const { from, to } = route;
-    if (!isLiveFareEnabled() || !from || !to || sameRegion(from, to)) return;
-    // 날짜(한국 시간)를 넣어 두면 창을 하루 넘게 열어 둬도 그날 배차로 다시 조회한다.
-    const routeKey = `${from.시도} ${from.시군}>${to.시도} ${to.시군}:${liveFareDay()}`;
-    const apply = (live: OfficialFare[]): void => {
-      wrap.querySelectorAll('[data-live-status]').forEach((el) => el.remove());
-      if (live.length === 0) {
-        // 요금표·내장 자료·보완 요금표에도 없는 구간이면, 실시간 조회로도 못 찾았다고 알려 준다.
-        if (tableFares.length === 0 && !wrap.querySelector('[data-official]')) {
-          liveStatus(wrap, '운임 정보 없음 · 경유 구간은 TAGO에 없을 수 있음', `국토교통부 시외버스·고속버스정보(TAGO)에 ${regionLabel(from)}→${regionLabel(to)} 배차 자료가 없습니다. TAGO 는 노선의 출발·도착 터미널 요금만 있어, 다른 곳에서 출발한 버스가 중간에 서는 경유 구간이나 갈아타는 구간은 빠져 있습니다. 네이버지도·터미널 시간표에서 요금을 확인해 입력하세요.`);
-        }
-        return;
-      }
-      wrap.querySelectorAll('[data-official]').forEach((chip) => chip.remove());
-      const before = wrap.querySelector('[data-region-switch], a');
-      const insert = (chip: HTMLElement): void => { wrap.insertBefore(chip, before); };
-      if (tableFares.length > 0) {
-        if (live[0].요금 !== tableFares[0].요금) insert(officialChip(wrap, amount, live[0], true));
-      } else {
-        live.forEach((fare) => insert(officialChip(wrap, amount, fare, false)));
-        if (busFareApplies(transport) && isUntouched(amount)) setAmount(amount, formatWon(live[0].요금));
-      }
-      transportNote(wrap, transport);
-      wrap.hidden = false;
-      markPressed(wrap, amount);
-    };
-    const known = liveResults.get(routeKey);
-    if (known) { apply(known); return; }
-    liveTimers.set(wrap, window.setTimeout(() => {
-      // 요금표 구간은 비교용이라 조용히 조회하고, 요금표에 없는 구간만 조회 중임을 보여 준다.
-      if (tableFares.length === 0) liveStatus(wrap, '실시간 운임 조회 중…', '국토교통부 시외버스·고속버스정보(TAGO)에서 오늘 배차 요금을 조회하고 있습니다.');
-      fetchLiveFares(from, to).then((live) => {
-        liveResults.set(routeKey, live);
-        if (liveTokens.get(wrap) === token) apply(live);
-      }).catch((err) => {
-        console.error(err);
-        if (liveTokens.get(wrap) !== token) return;
-        wrap.querySelectorAll('[data-live-status]').forEach((el) => el.remove());
-        if (tableFares.length === 0 && !wrap.querySelector('[data-official]')) {
-          liveStatus(wrap, '실시간 조회 실패', '국토교통부 시외버스·고속버스정보(TAGO) 조회에 실패했습니다. 잠시 뒤 다시 입력하거나 네이버지도에서 요금을 확인하세요.');
-        }
-      });
-    }, LIVE_FARE_DELAY_MS));
-  };
-  for (const direction of ['갈때', '올때']) {
-    for (const suffix of ['출발지', '도착지', '교통편']) {
-      const input = formEl.elements.namedItem(`${direction}${suffix}`);
-      if (!(input instanceof HTMLInputElement)) continue;
-      input.addEventListener('input', sync);
-      input.addEventListener('change', sync);
-    }
-    const amount = amountInput(direction);
-    const wrap = wraps.find((w) => w.dataset.fareSuggestions === direction);
-    if (amount && wrap) amount.addEventListener('input', () => markPressed(wrap, amount));
-  }
-  syncBusFares = sync;
-  sync();
-}
-
-/**
- * 미리보기 운임 금액 팝오버에 사이드패널과 같은 요금 칩(요금표·공식 운임·동명 지역 바꾸기·네이버지도)을 보여 준다.
- * 사이드패널의 칩 줄을 그대로 비춰 그리므로, 실시간 조회 결과나 바꾸기로 칩이 바뀌면 팝오버도 따라 바뀐다.
- * 금액 칩은 사이드패널 칩을 누른 것과 같게 반영하고 팝오버를 닫는다.
- */
-function fareSuggestionExtras(key: string, ctx: PopoverExtrasContext): { el: HTMLElement; cleanup: () => void } | null {
-  const direction = key.endsWith('금액') ? key.slice(0, -2) : '';
-  const wrap = direction ? formEl.querySelector<HTMLElement>(`[data-fare-suggestions="${direction}"]`) : null;
-  const amount = formEl.elements.namedItem(key);
-  if (!wrap || !(amount instanceof HTMLInputElement)) return null;
-  const el = document.createElement('div');
-  el.className = 'field-popover__fare-chips';
-  let lastAmount = amount.value;
-  const mirror = (chip: Element): Element => {
-    const copy = chip.cloneNode(true) as HTMLElement;
-    if (!(chip instanceof HTMLButtonElement)) return copy; // 네이버지도 링크는 그대로 연다
-    copy.addEventListener('click', () => {
-      chip.click();
-      if (chip.dataset.amount !== undefined) ctx.pick(chip.dataset.amount);
-    });
-    return copy;
-  };
-  const render = (): void => {
-    el.replaceChildren(...[...wrap.children].map(mirror));
-    el.hidden = el.childElementCount === 0;
-    // 바꾸기 칩 등으로 금액이 다시 자동 입력되면, 손대지 않은 입력칸도 따라 바꾼다
-    if (amount.value !== lastAmount && ctx.getValue() === lastAmount) ctx.setValue(amount.value);
-    lastAmount = amount.value;
-  };
-  const observer = new MutationObserver(render);
-  observer.observe(wrap, { childList: true, subtree: true, attributes: true });
-  render();
-  return { el, cleanup: () => observer.disconnect() };
-}
-
-function setupReturnLocationDefaults(): void {
-  for (const sourceName of Object.keys(RETURN_LOCATION_DEFAULTS)) {
+function setupReturnTripDefaults(): void {
+  for (const sourceName of Object.keys(RETURN_TRIP_DEFAULTS)) {
     const source = formEl.elements.namedItem(sourceName);
     if (!(source instanceof HTMLInputElement)) continue;
     const apply = (): void => {
-      applyReturnLocationDefault(sourceName);
+      // 올 때 교통편이 바뀌면 그 칸의 빠른 선택 칩 표시도 맞춘다 (값만 바꿔서 칩 쪽 input 이벤트가 없다).
+      if (applyReturnTripDefault(sourceName)) syncPresetChips?.();
     };
     source.addEventListener('input', apply);
     source.addEventListener('change', apply);
@@ -1251,22 +789,21 @@ async function applyPlaceCity(sourceName: string): Promise<void> {
   // 찾은 장소가 한 도시면 그 시도를 기억한다 — 칸에는 "고성" 만 들어가도 강원 고성·경남 고성을 가려 운임을 찾는다.
   const regions = new Set(found.map((result) => `${result.시도} ${result.city}`));
   const rememberRegion = (): void => {
-    if (regions.size === 1 && found[0].시도) placeRegionHints.set(targetName, { value: city, region: { 시도: found[0].시도, 시군: found[0].city } });
-    else placeRegionHints.delete(targetName);
+    fareSuggestions?.setRegionHint(targetName, city, regions.size === 1 && found[0].시도 ? { 시도: found[0].시도, 시군: found[0].city } : null);
   };
   const previousAutoValue = autoPlaceCities.get(targetName);
   if (target.value && target.value !== previousAutoValue) {
     // 직접 썼거나 URL·저장본으로 채워진 값이 찾은 도시와 같으면 시도만 기억한다.
     if (target.value.trim() === city) {
       rememberRegion();
-      syncBusFares?.();
+      fareSuggestions?.sync();
     }
     return;
   }
 
   autoPlaceCities.set(targetName, city);
   rememberRegion();
-  syncBusFares?.();
+  fareSuggestions?.sync();
   if (setFormFieldValue(targetName, city)) {
     const label = targetName.endsWith('출발지') ? '출발지' : '도착지';
     const places = found.map((result) => `${result.placeName} · ${result.address}`).join(' / ');
@@ -1337,8 +874,8 @@ function applyTravelDateDefault(control: HTMLElement): void {
   autoTravelDates.set(targetName, date);
 }
 
-function applyReturnLocationDefault(sourceName: string): boolean {
-  const targetName = RETURN_LOCATION_DEFAULTS[sourceName];
+function applyReturnTripDefault(sourceName: string): boolean {
+  const targetName = RETURN_TRIP_DEFAULTS[sourceName];
   if (!targetName) return false;
 
   const source = formEl.elements.namedItem(sourceName) as HTMLInputElement | null;
@@ -1492,13 +1029,16 @@ async function initialize(): Promise<void> {
   // setupDateTimeControls 보다 먼저 채워야 일시 picker 가 초기화 때 hidden input 값을 읽어 간다.
   const urlEntries = readUrlFormEntries();
   const urlFormApplied = urlEntries.length > 0;
+  // 「URL 공유」 표시가 없는 링크는 확장프로그램이 넘긴 것이다 (주소창을 지우기 전에 본다).
+  setupExtensionGuide(urlFormApplied && !isShareButtonUrl());
   const restoredFormState = restoreFormState(urlFormApplied ? URL_CARRY_OVER_KEYS : undefined);
   for (const [control, value] of urlEntries) setFormControlValue(control, value);
   setupFareRowControls();
   setDefaultSubmitDate();
   setupDateTimeControls();
-  setupReturnLocationDefaults();
-  setupBusFareSuggestions();
+  // 운임 제안보다 먼저 붙인다 — 갈 때 교통편·장소를 고치면 올 때 칸을 먼저 채운 뒤 두 방향 운임을 다시 계산하도록.
+  setupReturnTripDefaults();
+  fareSuggestions = setupFareSuggestions(formEl, { autoAmounts: restoredAutoBusFares });
   setupPlaceCityLookup();
   syncTemplateOnlyInputs();
   formEl.addEventListener('input', syncTemplateOnlyInputs);
@@ -1512,27 +1052,70 @@ async function initialize(): Promise<void> {
     input.value = todayDateValue();
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  setupApplicantInfoStorage();
+  setupApplicantInfoStorage({ formEl, setStatus, onSaved: saveFormState });
   if (urlFormApplied) {
     // 링크 값은 바로 저장하고 주소창에서 지운다 — 뒤의 양식 로드가 실패해도 주소에 링크가 남아
     // 새로고침마다 같은 실패를 되풀이하지 않고, 새로고침하면 저장본(= 이 링크의 값)으로 다시 열린다.
     saveFormState();
     clearUrlFormValues();
   }
-  await preloadFonts();
-
-  // 1) HWP 양식 fetch + 로드 — 소속에 따라 바꿔 끼울 수 있게 두 양식을 모두 받아 두고, 지금 소속의 양식을 연다.
-  const { wasm, docInfo, templateBytes: defaultTemplateBytes } = await loadTemplate(templateUrl('default'));
+  // 1) 글꼴·HWP 엔진·양식 두 개(소속에 따라 바꿔 끼운다)를 한꺼번에 받는다 — 예전처럼 글꼴을 다 받은 뒤에
+  //    엔진을, 그다음 양식을 차례로 받으면 느린 학교망에서 그 합만큼 첫 화면이 늦다.
+  //    문서를 여는 것(글자 폭을 재 줄을 나눈다)은 기본 글꼴까지 다 온 뒤에 한다.
+  const [wasm, defaultTemplateBytes, taebaekTemplateBytes] = await Promise.all([
+    createWasmBridge(),
+    fetchTemplateBytes(templateUrl('default')),
+    fetchTemplateBytes(templateUrl('taebaek')),
+    preloadFonts(),
+  ]);
   const templateBytesByKind: Record<TemplateKind, Uint8Array> = {
     default: defaultTemplateBytes,
-    taebaek: await fetchTemplateBytes(templateUrl('taebaek')),
+    taebaek: taebaekTemplateBytes,
   };
+  const docInfo = wasm.loadDocument(templateBytesByKind.default, 'business-trip.hwp');
   const taebaekDocInfo = wasm.loadDocument(templateBytesByKind.taebaek, 'business-trip-taebaek.hwp');
+  const templateBytes = (kind: ActiveTemplate): Uint8Array =>
+    (kind === 'custom' && customTemplate ? customTemplate.bytes : templateBytesByKind[kind === 'custom' ? 'default' : kind]);
+
+  /**
+   * 올린 양식을 엔진에 열어 쓸 수 있는지 본다 (문서가 그 양식으로 바뀐다 — 못 쓰면 부른 쪽이 원래 양식을 다시 연다).
+   * 누름틀이 하나도 없으면 채울 칸이 없으므로 받지 않는다.
+   */
+  function inspectCustomTemplate(template: CustomTemplate): { fontsUsed: string[]; expenseWritable: boolean } | { problem: string } {
+    // 깨진 파일을 엔진에 바로 올리면 쓰던 문서까지 잃으므로 먼저 따로 열어 본다 (문서는 아직 그대로다).
+    const openProblem = documentOpenProblem(template.bytes);
+    if (openProblem) return { problem: `양식을 열지 못했습니다: ${openProblem}` };
+    try {
+      const info = wasm.loadDocument(template.bytes, template.name);
+      if (discoverFields(wasm).size === 0) {
+        return { problem: '이 파일에는 누름틀이 없습니다. 한글에서 누름틀(Ctrl+K, E)을 넣고 이름을 소속·성명·출장지 등으로 맞춘 뒤 다시 올려 주세요.' };
+      }
+      return { fontsUsed: info.fontsUsed ?? [], expenseWritable: expenseCellsWritable(wasm) };
+    } catch (err) {
+      return { problem: `양식을 열지 못했습니다: ${describeError(err)}` };
+    }
+  }
+
+  // 지난번에 올려 둔 양식이 있으면 그것으로 연다. 열 수 없게 됐으면 저장본을 버리고 내장 양식으로 돌아간다.
+  let customFonts: string[] = [];
+  customTemplate = loadCustomTemplate();
+  if (customTemplate) {
+    const inspected = inspectCustomTemplate(customTemplate);
+    if ('problem' in inspected) {
+      console.warn('[web-form] 저장된 양식을 열지 못해 내장 양식으로 엽니다:', inspected.problem);
+      customTemplate = null;
+      clearCustomTemplate();
+    } else {
+      customFonts = inspected.fontsUsed;
+      customExpenseWritable = inspected.expenseWritable;
+    }
+  }
   let templateKind = currentTemplateKind();
-  if (templateKind === 'default') wasm.loadDocument(defaultTemplateBytes);
+  if (templateKind !== 'custom') wasm.loadDocument(templateBytes(templateKind));
+  syncTemplateOnlyInputs();
 
   // 1.5) 문서가 실제로 쓰는 폰트들을 적극 프리로드한 뒤 레이아웃 폭 측정값을 갱신
-  await preloadFonts([...(docInfo.fontsUsed ?? []), ...(taebaekDocInfo.fontsUsed ?? [])]);
+  await preloadFonts([...(docInfo.fontsUsed ?? []), ...(taebaekDocInfo.fontsUsed ?? []), ...customFonts]);
   wasm.refreshLayout();
 
   setStatus(`양식 로드 완료 (${docInfo.pageCount}쪽). 폼에서 입력하거나 미리보기에서 누름틀을 클릭하세요.`);
@@ -1556,6 +1139,8 @@ async function initialize(): Promise<void> {
   let automaticStampTimer = 0;
   let automaticStampVersion = 0;
   let automaticStampDataUrl: string | null = null;
+  /** 「문서 삭제」로 도장을 뺐으면 다시 넣거나 초기화할 때까지 성명으로 자동 도장을 만들지 않는다 (손으로 서명하려는 경우). */
+  let stampDeclined = false;
   updateSignatureButtons();
   // refreshPreview 가 문서를 export→reload 하면 도장 배치(글 뒤로)가 풀리므로, 위치는 그대로
   // 두고 본문배치만 다시 적용한다. (realign 은 reload 직후 좌표가 틀어져 위치가 어긋난다.)
@@ -1577,11 +1162,13 @@ async function initialize(): Promise<void> {
    * 원본 바이트를 다시 로드하고 나머지 값을 처음부터 채운다.
    */
   let appliedFareState = '0,0';
+  /** 올린 양식을 바꿔 끼웠거나 되돌렸을 때 — 양식 종류가 같아도 다음 반영에서 원본을 다시 연다. */
+  let templateSwapped = false;
   function reloadPristineTemplate(): void {
     const storedStamp = signatureStamp.getStoredStamp();
     const hadStamp = signatureStamp.hasStamp();
     signatureStamp.forgetDocumentState();
-    wasm.loadDocument(templateBytesByKind[templateKind]);
+    wasm.loadDocument(templateBytes(templateKind));
     // 운임 "행 삭제"는 표의 행을 지우지 않고 그 행의 내용(값·안내문구)만 비운다.
     const rawValues = collectRawFormValues();
     setSuppressedFareGuideLabels(
@@ -1613,19 +1200,27 @@ async function initialize(): Promise<void> {
     const nextTemplateKind = currentTemplateKind();
     const templateChanged = nextTemplateKind !== templateKind;
     templateKind = nextTemplateKind;
-    if (templateChanged || fareState !== appliedFareState || (options.clearEmpty && !rangeText && hasFilledRangeField())) {
+    if (templateChanged || templateSwapped || fareState !== appliedFareState || (options.clearEmpty && !rangeText && hasFilledRangeField())) {
       reloadPristineTemplate();
       appliedFareState = fareState;
+      templateSwapped = false;
     }
-    if (templateChanged && !statusMessage) {
+    if (templateChanged) updateTemplateStatus();
+    if (templateChanged && !statusMessage && templateKind !== 'custom') {
       setStatus(templateKind === 'taebaek' ? '태백교육지원청 양식으로 바꿨습니다.' : '기본 양식으로 바꿨습니다.');
     }
-    applyExpenseFields(wasm, rawValues);
-    const { applied, missing } = setFieldValues(wasm, fields, values, {
+    // 올린 양식은 표 구조가 기본 양식과 같을 때만 일반 칸(식비·동승자·등급·금액)을 쓴다 — 다르면 엉뚱한 칸을 지울 수 있다.
+    if (templateKind !== 'custom' || customExpenseWritable) applyExpenseFields(wasm, rawValues);
+    // 올린 양식: 출장명 누름틀이 있으면 거기에, 없으면 기본 양식처럼 출장지 아래 줄에 넣는다.
+    const tripNameInField = templateKind === 'taebaek' || (templateKind === 'custom' && fields.has('출장명'));
+    const fieldValues: Record<string, string> = templateKind === 'custom' && tripNameInField
+      ? { ...values, 출장명: rawValues.출장명 ?? '' }
+      : values;
+    const { applied, missing } = setFieldValues(wasm, fields, fieldValues, {
       clearEmpty: options.clearEmpty,
     });
-    // 기본 양식: 출장지 셀 아래 줄에 [출장명 : …] 을 넣는다 (태백 양식은 출장명 누름틀을 쓰므로 줄을 비운다).
-    applyTripNameLine(wasm, fields.get('출장지')?.[0]?.fieldId, templateKind === 'default' ? rawValues.출장명 ?? '' : '');
+    // 기본 양식: 출장지 셀 아래 줄에 [출장명 : …] 을 넣는다 (출장명 누름틀을 쓰는 양식은 줄을 비운다).
+    applyTripNameLine(wasm, fields.get('출장지')?.[0]?.fieldId, tripNameInField ? '' : rawValues.출장명 ?? '');
     // 첨부서류가 여럿이면 누름틀(첫 줄) 아래에 한 줄씩 — 마지막 줄 끝에 "  끝."
     applyAttachmentLines(wasm, fields.get('첨부서류')?.[0]?.fieldId, attachmentLines(rawValues.첨부서류 ?? ''));
     fillDateTimeRange(wasm, fields, rangeText, { clearEmpty: options.clearEmpty });
@@ -1636,36 +1231,38 @@ async function initialize(): Promise<void> {
     setStatus(statusMessage.replace('{applied}', String(applied)) + warn, missing.length > 0);
   }
 
-  function applyTravelDatesToPreview(): void {
-    const { 갈때일자, 올때일자 } = collectFormValues();
-    setFieldValues(wasm, fields, { 갈때일자, 올때일자 });
-  }
-
-  function applyReturnLocationsToPreview(): void {
-    const { 올때출발지, 올때도착지 } = collectFormValues();
-    setFieldValues(wasm, fields, { 올때출발지, 올때도착지 }, { clearEmpty: true });
-  }
+  // 양식 상태 표시(updateTemplateStatus)가 쓰는 요소 — 아래 첫 반영에서 양식이 바뀌면 바로 불리므로 먼저 찾아 둔다.
+  const templateFileInput = document.getElementById('template-file') as HTMLInputElement | null;
+  const templateResetBtn = document.getElementById('btn-template-reset') as HTMLButtonElement | null;
+  const templateStatusEl = document.getElementById('template-current');
 
   if (urlFormApplied) {
     // 공유 URL 의 의도를 한 번 더 명확히 — 폼에 반영한 값을 그대로 미리보기에 적용한다.
     applyCollectedValuesToPreview('공유 URL 의 값을 양식에 채웠습니다.');
   } else if (restoredFormState) {
     applyCollectedValuesToPreview('저장된 입력 내용을 복원했습니다.');
+  } else {
+    // 처음 열었거나 초기화 뒤에도 폼의 기본값(제출날짜·등급)과 엔진을 받는 동안 친 값을 미리보기에 넣는다.
+    applyCollectedValuesToPreview();
   }
 
-  const storedSignatureStamp = loadStoredSignatureStamp();
-  if (storedSignatureStamp) {
-    try {
-      signatureStamp.applyStored(storedSignatureStamp);
-      refreshPreviewAndRealignSignatureStamp();
-      updateSignatureButtons();
-      setStatus('브라우저에 저장된 도장/서명 이미지를 복원했습니다.');
-    } catch (err) {
-      console.warn('[web-form] 저장된 도장/서명 이미지 복원 실패:', err);
-      clearStoredSignatureStamp();
-      updateSignatureButtons();
-      setStatus('저장된 도장/서명 이미지를 불러오지 못해 저장본을 삭제했습니다.', true);
-    }
+  /** 브라우저에 저장된 도장을 문서에 넣는다 (시작할 때·초기화 뒤). 넣었으면 true, 저장본이 없으면 false. 실패하면 예외. */
+  function restoreSavedSignatureStamp(): boolean {
+    const stored = loadStoredSignatureStamp();
+    if (!stored) return false;
+    signatureStamp.applyStored(stored);
+    refreshPreviewAndRealignSignatureStamp();
+    updateSignatureButtons();
+    return true;
+  }
+
+  try {
+    if (restoreSavedSignatureStamp()) setStatus('브라우저에 저장된 도장/서명 이미지를 복원했습니다.');
+  } catch (err) {
+    console.warn('[web-form] 저장된 도장/서명 이미지 복원 실패:', err);
+    clearStoredSignatureStamp();
+    updateSignatureButtons();
+    setStatus('저장된 도장/서명 이미지를 불러오지 못해 저장본을 삭제했습니다.', true);
   }
 
   function cancelAutomaticStamp(): void {
@@ -1683,8 +1280,8 @@ async function initialize(): Promise<void> {
     window.clearTimeout(automaticStampTimer);
     const version = ++automaticStampVersion;
     const name = applicantStampName();
-    const canReplace = () => !signatureStamp.hasStamp()
-      || (automaticStampDataUrl !== null && signatureStamp.getStoredStamp()?.dataUrl === automaticStampDataUrl);
+    const canReplace = () => !stampDeclined && (!signatureStamp.hasStamp()
+      || (automaticStampDataUrl !== null && signatureStamp.getStoredStamp()?.dataUrl === automaticStampDataUrl));
     if (!canReplace()) return;
     if (!name) {
       if (automaticStampDataUrl) {
@@ -1708,7 +1305,9 @@ async function initialize(): Promise<void> {
         updateSignatureButtons();
         setStatus('성명으로 기본 개인인감을 만들었습니다. 계속 쓰려면 브라우저 저장을 누르세요.');
       } catch (err) {
-        if (isCurrent()) setStatus(`기본 도장 생성 실패: ${describeError(err)}`, true);
+        // 올린 양식에 (인) 자리가 없으면 도장을 넣을 수 없다 — 이름을 칠 때마다 오류를 띄우지 않고 넘어간다.
+        if (templateKind === 'custom') console.warn('[web-form] 올린 양식에 기본 도장을 넣지 못했습니다:', err);
+        else if (isCurrent()) setStatus(`기본 도장 생성 실패: ${describeError(err)}`, true);
       }
     }, 650);
   }
@@ -1763,11 +1362,14 @@ async function initialize(): Promise<void> {
       getRegions: () => {
         // "행 삭제"된 운임 행의 등급 칸은 비어 있으므로 편집 대상에서 뺀다
         const deleted = getFareDeletedState();
-        return getCellRegions(wasm).filter((region) => region.kind !== 'text' || !region.fareDirection || !deleted[region.fareDirection]);
+        // 올린 양식의 표 구조가 다르면 일반 칸은 쓰지 않으므로 눌러 고치는 자리도 두지 않는다 (운임 행 메뉴만 남긴다).
+        const writable = templateKind !== 'custom' || customExpenseWritable;
+        return getCellRegions(wasm).filter((region) =>
+          region.kind !== 'text' ? true : writable && (!region.fareDirection || !deleted[region.fareDirection]));
       },
       getValue: (key) => getFormFieldValue(key),
       getSuggestions: (key) => (key === '등급' ? { label: '등급', values: [...GRADE_OPTIONS] } : getPassengerOrgSuggestion(key)),
-      getExtras: fareSuggestionExtras,
+      getExtras: (key, ctx) => fareSuggestions?.popoverExtras(key, ctx) ?? null,
       commit: (key, value) => {
         if (!setFormFieldValue(key, value)) return;
         setStatus(value ? `"${value}" 을(를) 반영했습니다.` : '해당 칸을 비웠습니다.');
@@ -1796,18 +1398,19 @@ async function initialize(): Promise<void> {
     onReveal: revealFormControl,
     onAfterEdit: (label, value) => {
       syncFormFromInline(label, value);
-      if (label === '성명' || label === '이름') scheduleAutomaticStamp();
-      if (label === '시작일시' || label === '종료일시') {
-        applyTravelDatesToPreview();
-      }
-      if (applyReturnLocationDefault(label)) {
-        applyReturnLocationsToPreview();
-      }
-      if (label.endsWith('출발지') || label.endsWith('도착지') || label.endsWith('교통편')) syncBusFares?.();
-      refreshPreviewAndRealignSignatureStamp();
-      fields = discoverFields(wasm);
-      saveFormState();
+      // 사이드패널에서 고친 것처럼 input 을 흘려 연동(올 때 칸·운임·지도 검색·자동 도장·빈칸 배지·임시 저장)을 그대로 탄다.
+      findValueControl(label === '이름' ? '성명' : label === '종료일시' ? '시작일시' : label)
+        ?.dispatchEvent(new Event('input', { bubbles: true }));
+      // 미리보기는 지금 한 번에 폼 값으로 다시 채운다 — 이름·성명 두 칸, 소속에 따른 양식 바꾸기, 제출날짜까지 맞춘다.
+      // ("다음"으로 열릴 칸이 이 결과를 보고 고르도록 기다리지 않고 바로 한다.)
+      window.clearTimeout(livePreviewTimer);
       setStatus(`"${label}" 항목을 반영했습니다.`);
+      try {
+        applyCollectedValuesToPreview(undefined, { clearEmpty: true });
+      } catch (err) {
+        console.error(err);
+        setStatus(`미리보기 반영 실패: ${describeError(err)}`, true);
+      }
     },
   });
 
@@ -1840,6 +1443,7 @@ async function initialize(): Promise<void> {
     options: { rotationDeg?: number } = {},
   ): Promise<void> {
     cancelAutomaticStamp();
+    stampDeclined = false;
     try {
       await signatureStamp.applyFile(file, undefined, options);
       const saveError = persistCurrentSignature();
@@ -1857,6 +1461,8 @@ async function initialize(): Promise<void> {
 
   signatureInput?.addEventListener('change', async () => {
     const file = signatureInput.files?.[0];
+    // 같은 파일을 다시 골라도 change 가 오도록 비운다 (양식 올리기 칸과 같은 방식). 읽은 File 은 그대로 쓸 수 있다.
+    signatureInput.value = '';
     if (!file) return;
     await applySignatureFile(file, '도장/서명 이미지를 성명 옆 (인)에 넣었습니다.');
   });
@@ -1895,6 +1501,7 @@ async function initialize(): Promise<void> {
   function clearSignatureFromDocument(): void {
     cancelAutomaticStamp();
     const removed = signatureStamp.clear();
+    if (removed) stampDeclined = true;
     if (signatureInput) signatureInput.value = '';
     updateSignatureButtons();
     if (removed) {
@@ -1998,6 +1605,87 @@ async function initialize(): Promise<void> {
         : '브라우저에 저장하지 못한 이미지 사용 중 — "브라우저 저장"을 다시 눌러 보세요';
   }
 
+  // 5-1) 양식 바꾸기 — 누름틀이 든 자기 기관 HWP 를 올려 쓰거나 내장 양식으로 되돌린다.
+  /** 올린 양식에서 연결하지 못한 입력 항목 (성명·이름은 한쪽만 있어도 된다. 출장명·종료일시는 없어도 다른 칸에 들어간다) */
+  function unmatchedTemplateLabels(): string[] {
+    return Object.keys(FIELD_CONFIGS).filter((label) => {
+      if (label === '이름' || label === '출장명' || label === '종료일시') return false;
+      if (label === '성명') return !fields.has('성명') && !fields.has('이름');
+      return !fields.has(label);
+    });
+  }
+  function updateTemplateStatus(): void {
+    if (templateResetBtn) templateResetBtn.hidden = !customTemplate;
+    if (!templateStatusEl) return;
+    if (!customTemplate) {
+      templateStatusEl.textContent = templateKind === 'taebaek' ? '태백교육지원청 양식 사용 중 (소속에 따라 자동 선택)' : '기본 양식 사용 중';
+      return;
+    }
+    const notes = [`올린 양식 사용 중: ${customTemplate.name}`];
+    const unmatched = unmatchedTemplateLabels();
+    if (unmatched.length > 0) notes.push(`양식에 누름틀이 없어 들어가지 않는 항목: ${unmatched.join(', ')}`);
+    if (!customExpenseWritable) notes.push('표 구조가 기본 양식과 달라 식비·동승자·등급·금액 칸은 자동으로 넣지 않습니다');
+    templateStatusEl.textContent = notes.join(' · ');
+  }
+  /** 양식을 바꿔 끼운 뒤 지금 입력값을 새 양식에 다시 채운다. */
+  function reapplyAfterTemplateSwap(): void {
+    templateSwapped = true;
+    window.clearTimeout(livePreviewTimer);
+    syncTemplateOnlyInputs();
+    applyCollectedValuesToPreview(undefined, { clearEmpty: true });
+    updateTemplateStatus();
+    updateSignatureButtons();
+  }
+  updateTemplateStatus();
+
+  templateFileInput?.addEventListener('change', async () => {
+    const file = templateFileInput.files?.[0];
+    templateFileInput.value = '';
+    if (!file) return;
+    try {
+      const candidate: CustomTemplate = { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) };
+      const problem = customTemplateProblem(candidate.bytes);
+      if (problem) {
+        setStatus(problem, true);
+        return;
+      }
+      const inspected = inspectCustomTemplate(candidate);
+      if ('problem' in inspected) {
+        // 살펴보느라 문서가 올린 파일로 바뀌었으므로 쓰던 양식을 다시 연다.
+        reapplyAfterTemplateSwap();
+        setStatus(inspected.problem, true);
+        return;
+      }
+      customTemplate = candidate;
+      customExpenseWritable = inspected.expenseWritable;
+      await preloadFonts(inspected.fontsUsed);
+      // 글꼴을 받는 동안 되돌리기나 다른 파일 올리기를 했으면 그쪽이 이미 반영했다 — 이 파일은 저장하지 않는다.
+      if (customTemplate !== candidate) return;
+      reapplyAfterTemplateSwap();
+      const saved = saveCustomTemplate(candidate);
+      setStatus(saved
+        ? `올린 양식으로 바꿨습니다: ${file.name} (이 브라우저에 저장해 다음에도 씁니다)`
+        : `올린 양식으로 바꿨습니다: ${file.name} (브라우저에 저장하지 못해 이번 방문 동안만 씁니다)`, !saved);
+    } catch (err) {
+      console.error(err);
+      setStatus(`양식 적용 실패: ${describeError(err)}`, true);
+    }
+  });
+
+  templateResetBtn?.addEventListener('click', () => {
+    if (!customTemplate) return;
+    customTemplate = null;
+    customExpenseWritable = false;
+    clearCustomTemplate();
+    try {
+      reapplyAfterTemplateSwap();
+      setStatus('내장 양식으로 되돌렸습니다. 올려 둔 양식은 브라우저에서 지웠습니다.');
+    } catch (err) {
+      console.error(err);
+      setStatus(`양식 되돌리기 실패: ${describeError(err)}`, true);
+    }
+  });
+
   // 모바일 전용 — 폼을 닫고 미리보기를 보여준다. 입력은 이미 자동 반영되어 있다.
   document.getElementById('btn-show-preview')?.addEventListener('click', () => {
     pushRecentValuesFromForm();
@@ -2093,8 +1781,11 @@ async function initialize(): Promise<void> {
     // 입력 직후 초기화하면 120ms 디바운스 타이머가 옛 입력값을 다시 반영할 수 있어 먼저 취소
     window.clearTimeout(livePreviewTimer);
     cancelAutomaticStamp();
+    stampDeclined = false;
     const removedStamp = signatureStamp.clear();
     formEl.reset();
+    // reset() 은 input 이벤트를 내지 않으므로 양식별 입력(식비)·첨부서류 칩 표시를 직접 맞춘다.
+    syncTemplateOnlyInputs();
     for (const direction of ['갈때', '올때']) {
       (formEl.elements.namedItem(`${direction}운임삭제`) as HTMLInputElement).value = '0';
     }
@@ -2103,7 +1794,8 @@ async function initialize(): Promise<void> {
     autoTravelDates.clear();
     autoReturnLocations.clear();
     autoPlaceCities.clear();
-    autoBusFares.clear();
+    fareSuggestions?.forgetAutoAmounts();
+    fareSuggestions?.clearRegionHints();
     clearSavedFormState();
     // 일시 picker 는 hidden input 의 defaultValue 가 이전 입력값으로 굳어버려 formEl.reset() 만으로는
     // 비워지지 않는다. 명시적으로 controller + attribute 를 함께 초기화한다.
@@ -2112,7 +1804,8 @@ async function initialize(): Promise<void> {
     if (signatureInput) signatureInput.value = '';
     updateSignatureButtons();
     syncPresetChips?.();
-    syncBusFares?.();
+    syncAttachmentPresetChips?.();
+    fareSuggestions?.sync();
     updateRequiredBadges();
     try {
       applyCollectedValuesToPreview(undefined, { clearEmpty: true });
@@ -2120,7 +1813,16 @@ async function initialize(): Promise<void> {
       console.error(err);
       if (removedStamp) refreshPreview(wasm);
     }
-    setStatus('초기화했습니다.');
+    // 새로 고침한 것처럼 브라우저에 저장된 도장을 다시 넣는다 — 그러지 않으면 성명을 치자마자 자동 도장이 들어가고,
+    // 「브라우저 저장」을 누르면 저장해 둔 도장이 그것으로 덮인다. 실패해도 저장본은 지우지 않는다.
+    let restoredStamp = false;
+    try {
+      restoredStamp = restoreSavedSignatureStamp();
+    } catch (err) {
+      console.warn('[web-form] 초기화 뒤 저장된 도장 다시 넣기 실패:', err);
+      updateSignatureButtons();
+    }
+    setStatus(restoredStamp ? '초기화했습니다. 브라우저에 저장된 도장을 다시 넣었습니다.' : '초기화했습니다.');
   });
 
   /**

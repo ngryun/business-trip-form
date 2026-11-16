@@ -34,6 +34,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # 테스트가 깨진 채로 배포되지 않게 한다 (실제 HWP 편집·저장·재열기 검증 포함)
+      - name: Test
+        run: pnpm test
+
       - name: Build
         run: pnpm build
         env:

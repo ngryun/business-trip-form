@@ -18,12 +18,36 @@ export const ATTACHMENT_PRESETS = ['주유영수증 1부', '하이패스영수�
 /** 마지막 문서 뒤에 붙이는 맺음 — 두 칸 띄우고 `끝.` */
 const END_MARK = '  끝.';
 
+const OPEN_BRACKETS = '([{（［｛「『〈《【';
+const CLOSE_BRACKETS = ')]}）］｝」』〉》】';
+
+/**
+ * 한 줄을 쉼표로 나눈다 — 괄호 안의 쉼표(`영수증(유류비, 통행료) 1부`)와 금액의 천 단위 쉼표(3,500)는 나누지 않는다.
+ * 괄호 깊이는 줄마다 새로 센다 (닫히지 않은 괄호가 다음 줄까지 번지지 않게).
+ */
+function splitAttachmentLine(line: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (OPEN_BRACKETS.includes(ch)) depth += 1;
+    else if (CLOSE_BRACKETS.includes(ch)) depth = Math.max(0, depth - 1);
+    else if (ch === ',' && depth === 0 && !/\d/.test(line[i + 1] ?? '')) {
+      parts.push(line.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(line.slice(start));
+  return parts;
+}
+
 /**
  * 입력값 → 문서 목록. 줄바꿈이나 쉼표로 나눈다 (예전처럼 쉼표로 이어 쓴 값도 줄로 나뉜다).
- * 금액의 천 단위 쉼표(3,500)는 나누지 않고, 직접 적은 맨 끝 `끝.` 은 뺀다 (두 번 붙지 않게).
+ * 괄호 안의 쉼표와 금액의 천 단위 쉼표(3,500)는 나누지 않고, 직접 적은 맨 끝 `끝.` 은 뺀다 (두 번 붙지 않게).
  */
 export function parseAttachmentItems(value: string): string[] {
-  const items = (value ?? '').split(/\r?\n|,(?!\d)/).map((s) => s.trim()).filter(Boolean);
+  const items = (value ?? '').split(/\r?\n/).flatMap(splitAttachmentLine).map((s) => s.trim()).filter(Boolean);
   if (items.length > 0) {
     const last = items.pop()!.replace(/(?:^|\s)끝\.?$/, '').trim();
     if (last) items.push(last);

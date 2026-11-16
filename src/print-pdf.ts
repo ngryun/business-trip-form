@@ -68,7 +68,17 @@ export async function printPdf(wasm: WasmBridge, fileName = '출장신청서.pdf
   }
 
   const html = buildPrintHtml(pages);
-  await printInIframe(html);
+  // 「PDF로 저장」 기본 파일 이름은 브라우저가 문서 제목에서 정한다 (Chrome·Edge·Firefox 는 최상위 문서, Safari 는 인쇄하는 문서).
+  // 인쇄 창이 닫힐 때까지 제목을 파일 이름으로 바꿔 둔다 — print() 직후에 되돌리면 Chrome 이 읽기 전에 돌아간다.
+  // 성명은 공유 링크에서도 오므로 HTML 에 넣지 않고 DOM 제목으로만 넣는다.
+  const printTitle = ensurePdfExtension(fileName).replace(/\.pdf$/i, '');
+  const previousTitle = document.title;
+  document.title = printTitle;
+  try {
+    await printInIframe(html, printTitle);
+  } finally {
+    document.title = previousTitle;
+  }
   return 'printed';
 }
 
@@ -306,7 +316,7 @@ ${body}
 </html>`;
 }
 
-function printInIframe(html: string): Promise<void> {
+function printInIframe(html: string, title: string): Promise<void> {
   return new Promise((resolve) => {
     const iframe = document.createElement('iframe');
     iframe.setAttribute('aria-hidden', 'true');
@@ -337,6 +347,7 @@ function printInIframe(html: string): Promise<void> {
         finish();
         return;
       }
+      win.document.title = title;
       // afterprint 이벤트는 데스크톱 Chrome/Firefox 에서 잘 동작한다. 모바일 미지원 환경을 위해
       // 강제 타이머도 함께 둔다.
       const onAfter = (): void => {

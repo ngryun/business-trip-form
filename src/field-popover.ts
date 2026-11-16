@@ -16,7 +16,6 @@ import { ATTACHMENT_PRESETS, hasAttachmentItem, toggleAttachmentItem } from './a
 import {
   FIELD_CONFIGS,
   formatDateKR,
-  formatDateTimeCompactKR,
   type WidgetConfig,
 } from './field-config';
 
@@ -217,17 +216,20 @@ export function showFieldPopover(args: PopoverArgs): void {
     } else if (args.onNext && isNextShortcut(ke)) {
       ke.preventDefault();
       finish('next');
-    } else if (ke.key === 'Escape') {
-      ke.preventDefault();
-      finish('cancel');
     }
+  });
+  // Esc 는 입력칸뿐 아니라 확인·취소·최근 값 칩에 포커스가 있어도 닫는다 (Enter·→ 처리는 입력칸에만 둔다).
+  root.addEventListener('keydown', (e) => {
+    if ((e as KeyboardEvent).key !== 'Escape' || e.defaultPrevented) return;
+    e.preventDefault();
+    finish('cancel');
   });
 
   // 외부 클릭 시 취소 — 팝오버 자체를 연 click 이벤트가 곧장 닫지 않도록 다음 틱에 바인딩
   const onOuter = (e: MouseEvent): void => {
     if (!root.contains(e.target as Node)) finish('cancel');
   };
-  setTimeout(() => document.addEventListener('mousedown', onOuter, { capture: true }), 0);
+  bindOuterMousedown(root, onOuter);
   currentCleanup = () => {
     document.removeEventListener('mousedown', onOuter, { capture: true } as any);
     extras?.cleanup?.();
@@ -463,7 +465,7 @@ export function showDateTimeRangePopover(args: DateTimeRangePopoverArgs): void {
   const onOuter = (e: MouseEvent): void => {
     if (!root.contains(e.target as Node)) finish('cancel');
   };
-  setTimeout(() => document.addEventListener('mousedown', onOuter, { capture: true }), 0);
+  bindOuterMousedown(root, onOuter);
   currentCleanup = () => document.removeEventListener('mousedown', onOuter, { capture: true } as any);
 
   setTimeout(() => focusInput(args.initialTab === 'end' ? endPicker : startPicker), 0);
@@ -568,7 +570,7 @@ export function showStampPopover(args: StampPopoverArgs): void {
   const onOuter = (e: MouseEvent): void => {
     if (!root.contains(e.target as Node)) closeFieldPopover();
   };
-  setTimeout(() => document.addEventListener('mousedown', onOuter, { capture: true }), 0);
+  bindOuterMousedown(root, onOuter);
   currentCleanup = () => document.removeEventListener('mousedown', onOuter, { capture: true } as any);
 
   setTimeout(() => {
@@ -641,7 +643,7 @@ export function showFareRowPopover(args: FareRowPopoverArgs): void {
   const onOuter = (e: MouseEvent): void => {
     if (!root.contains(e.target as Node)) closeFieldPopover();
   };
-  setTimeout(() => document.addEventListener('mousedown', onOuter, { capture: true }), 0);
+  bindOuterMousedown(root, onOuter);
   currentCleanup = () => document.removeEventListener('mousedown', onOuter, { capture: true } as any);
 
   setTimeout(() => {
@@ -902,14 +904,26 @@ function focusInput(input: HTMLElement): void {
   if (target instanceof HTMLInputElement && target.type === 'text') target.select();
 }
 
+/**
+ * 바깥 클릭으로 닫는 리스너를 다음 틱에 붙인다 — 팝오버를 연 클릭이 곧장 닫지 않게.
+ * 그 사이에 팝오버가 닫혔으면(스크롤 등) 붙이지 않는다. 붙이면 정리가 이미 끝나 떼어 낼 수 없고,
+ * 그 뒤로 여는 모든 팝오버가 안을 눌러도 닫힌다.
+ */
+function bindOuterMousedown(root: HTMLElement, onOuter: (e: MouseEvent) => void): void {
+  setTimeout(() => {
+    if (currentPopover === root) document.addEventListener('mousedown', onOuter, { capture: true });
+  }, 0);
+}
+
 function isNextShortcut(e: KeyboardEvent): boolean {
   if (e.key !== 'ArrowRight' || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return false;
   const target = e.target as HTMLElement | null;
   if (target instanceof HTMLTextAreaElement) {
     return isCaretAtEnd(target);
   }
-  if (target instanceof HTMLInputElement && ['text', 'search', 'tel', 'url', 'email', 'password'].includes(target.type)) {
-    return isCaretAtEnd(target);
+  if (target instanceof HTMLInputElement) {
+    // 날짜 칸(type=date)은 →로 연·월·일 사이를 옮겨 다니므로 다음 칸으로 넘기지 않는다.
+    return ['text', 'search', 'tel', 'url', 'email', 'password'].includes(target.type) && isCaretAtEnd(target);
   }
   return true;
 }

@@ -2,6 +2,7 @@ import terminalsJson from './data/tago-terminals.json';
 import expressTerminalsJson from './data/tago-express-terminals.json';
 import { hasGrade, mergeOfficialFares, reverseOfficialFares, sortOfficialFares, summarizeFareRows, type OfficialFare } from './bus-fares';
 import { expressTerminalsForRegion, terminalsForRegion, type FareRegion, type TagoTerminal } from './fare-region';
+import { isTagoLimitError, parseTagoResponse } from './tago-response';
 
 /**
  * 국토교통부 TAGO 시외버스정보 API를 브라우저에서 바로 불러 출발지→도착지 공식 운임을 찾는다.
@@ -38,6 +39,18 @@ const RATE_LIMIT_RETRY_MS = 1200;
 const STORAGE_PREFIX = 'tago-fare:';
 
 const memory = new Map<string, Promise<OfficialFare[]>>();
+/** 일부 터미널 쌍 조회가 실패한 채 합친 결과 — 기억하지 않고, 일반 등급이 없으면 금액을 자동으로 넣지 않는다. */
+const partialResults = new WeakSet<OfficialFare[]>();
+/**
+ * TAGO 에 노선 자료가 아예 없는 지역(2026-11 실제 호출로 확인: 경남 서부 착발 노선) — 터미널 쌍마다 불러도 늘 빈 결과라
+ * 공용 호출 한도만 쓴다(서울↔진주 한 번에 60여 회). 조회하지 않고 보완 요금표·네이버지도 링크로 넘긴다.
+ */
+const NO_TAGO_REGIONS = new Set(['경남 진주', '경남 하동', '경남 고성']);
+
+/** 일부 터미널 조회가 실패한 채 합친 실시간 결과인가 */
+export function isPartialLiveResult(fares: readonly OfficialFare[]): boolean {
+  return partialResults.has(fares as OfficialFare[]);
+}
 
 export function isLiveFareEnabled(): boolean {
   return TAGO_KEY !== '';
@@ -89,18 +102,13 @@ async function callTago(service: Service, dep: TagoTerminal, arr: TagoTerminal, 
   const timer = window.setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
     const res = await fetch(`${service.base}/${service.op}?serviceKey=${serviceKey}&${qs}`, { signal: controller.signal });
-    const json = await res.json();
-    const header = json?.response?.header;
-    if (header?.resultCode !== '00') {
-      const message = String(header?.resultMsg ?? res.status);
-      if (!retried && /LIMITED_NUMBER_OF_SERVICE_REQUESTS/.test(message)) {
-        await new Promise((resolve) => window.setTimeout(resolve, RATE_LIMIT_RETRY_MS));
-        return callTago(service, dep, arr, true);
-      }
-      throw new Error(`TAGO: ${message}`);
+    try {
+      return parseTagoResponse(await res.text(), res.status);
+    } catch (err) {
+      if (retried || !isTagoLimitError(err)) throw err;
     }
-    const item = json.response.body?.items?.item;
-    return Array.isArray(item) ? item : item ? [item] : [];
+    await new Promise((resolve) => window.setTimeout(resolve, RATE_LIMIT_RETRY_MS));
+    return callTago(service, dep, arr, true);
   } finally {
     window.clearTimeout(timer);
   }
@@ -129,6 +137,27 @@ const pairsOf = (deps: readonly TagoTerminal[], arrs: readonly TagoTerminal[]): 
   deps.flatMap((dep) => arrs.map((arr) => [dep, arr] as const));
 
 /**
+ * 고속버스 쌍을 터미널 이름 조합마다 첫 id 끼리 먼저 오게 늘어놓는다 — 출발 터미널 순서대로 자르면 한도(24쌍) 안에
+ * 첫 출발 터미널의 id 만 들어가 서울경부·센트럴시티를 아예 안 부르게 된다.
+ */
+function interleavedPairs(deps: readonly TagoTerminal[], arrs: readonly TagoTerminal[]): Pair[] {
+  const rankWithinName = (list: readonly TagoTerminal[]): Map<TagoTerminal, number> => {
+    const seen = new Map<string, number>();
+    return new Map(list.map((t) => {
+      const rank = seen.get(t.name) ?? 0;
+      seen.set(t.name, rank + 1);
+      return [t, rank] as const;
+    }));
+  };
+  const depRank = rankWithinName(deps);
+  const arrRank = rankWithinName(arrs);
+  return pairsOf(deps, arrs)
+    .map((pair, index) => ({ pair, index, rank: (depRank.get(pair[0]) ?? 0) + (arrRank.get(pair[1]) ?? 0) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map(({ pair }) => pair);
+}
+
+/**
  * 터미널 쌍들을 몇 쌍씩 불러 등급별 최저 요금으로 합친다 (같은 구간도 터미널마다 등급·요금이 다르다:
  * 서울경부→양양 고속 16,700, 동서울→양양 우등 20,100). 일부 쌍이 실패해도 나머지로 합치고, 첫 실패는 따로 돌려준다.
  */
@@ -149,25 +178,30 @@ async function fetchPairs(service: Service, pairs: readonly Pair[]): Promise<{ f
  * 시외버스: 두 지역의 터미널 쌍을 모두 불러 등급별 최저 요금으로 합친다. 그쪽 방향 배차 자료가 없으면
  * 주 터미널끼리 반대 방향(같은 요금)도 본다. 요금이 하나도 없는데 일부 쌍이 실패했으면 예외 — 다음에 다시 조회하게 한다.
  */
-async function findSuburbsFares(from: FareRegion, to: FareRegion): Promise<OfficialFare[]> {
+async function findSuburbsFares(from: FareRegion, to: FareRegion): Promise<{ fares: OfficialFare[]; partial: boolean }> {
   const deps = terminalsForRegion(from, TERMINALS).slice(0, SUBURBS_MAX_TERMINALS);
   const arrs = terminalsForRegion(to, TERMINALS).slice(0, SUBURBS_MAX_TERMINALS);
-  if (deps.length === 0 || arrs.length === 0) return [];
+  if (deps.length === 0 || arrs.length === 0) return { fares: [], partial: false };
   const forward = await fetchPairs(SUBURBS, pairsOf(deps, arrs));
-  if (forward.fares.length) return forward.fares;
+  if (forward.fares.length) return { fares: forward.fares, partial: forward.failure !== null };
   const reverse = await fetchPairs(SUBURBS, pairsOf(arrs.slice(0, SUBURBS_REVERSE_TERMINALS), deps.slice(0, SUBURBS_REVERSE_TERMINALS)));
-  if (reverse.fares.length) return reverseOfficialFares(reverse.fares, to.시도);
+  if (reverse.fares.length) return { fares: reverseOfficialFares(reverse.fares, to.시도), partial: (forward.failure ?? reverse.failure) !== null };
   const failure = forward.failure ?? reverse.failure;
   if (failure) throw failure;
-  return [];
+  return { fares: [], partial: false };
 }
 
 /** 고속버스: 노선마다 터미널 id 가 달라 쌍을 여러 개 불러야 한다. 모든 쌍을 불러 등급별 최저 요금으로 합친다. */
-async function findExpressFares(from: FareRegion, to: FareRegion): Promise<OfficialFare[]> {
+async function findExpressFares(from: FareRegion, to: FareRegion): Promise<{ fares: OfficialFare[]; partial: boolean }> {
   const deps = expressTerminalsForRegion(from, EXPRESS_TERMINALS);
   const arrs = expressTerminalsForRegion(to, EXPRESS_TERMINALS);
-  const { fares, failure } = await fetchPairs(EXPRESS, pairsOf(deps, arrs).slice(0, EXPRESS_MAX_PAIRS));
+  const { fares, failure } = await fetchPairs(EXPRESS, interleavedPairs(deps, arrs).slice(0, EXPRESS_MAX_PAIRS));
   if (fares.length === 0 && failure) throw failure;
+  return { fares, partial: failure !== null };
+}
+
+function markPartial(fares: OfficialFare[], partial: boolean): OfficialFare[] {
+  if (partial) partialResults.add(fares);
   return fares;
 }
 
@@ -181,6 +215,7 @@ const routeKey = (from: FareRegion, to: FareRegion): string => `${from.시도} $
  */
 export function fetchLiveFares(from: FareRegion, to: FareRegion): Promise<OfficialFare[]> {
   if (!isLiveFareEnabled()) return Promise.resolve([]);
+  if (NO_TAGO_REGIONS.has(`${from.시도} ${from.시군}`) || NO_TAGO_REGIONS.has(`${to.시도} ${to.시군}`)) return Promise.resolve([]);
   const key = routeKey(from, to);
   let pending = memory.get(key);
   if (!pending) {
@@ -188,18 +223,20 @@ export function fetchLiveFares(from: FareRegion, to: FareRegion): Promise<Offici
     pending = (async () => {
       if (reverse) {
         const fares = await reverse.catch(() => [] as OfficialFare[]);
-        if (fares.length) return reverseOfficialFares(fares, to.시도);
+        if (fares.length && !partialResults.has(fares)) return reverseOfficialFares(fares, to.시도);
       }
       const suburbs = await findSuburbsFares(from, to);
-      if (hasGrade(suburbs, '일반')) return suburbs;
+      if (hasGrade(suburbs.fares, '일반')) return markPartial(suburbs.fares, suburbs.partial);
+      let expressFailed = false;
       const express = await findExpressFares(from, to).catch((err: unknown) => {
-        if (suburbs.length === 0) throw err;
-        return [] as OfficialFare[];
+        if (suburbs.fares.length === 0) throw err;
+        expressFailed = true;
+        return { fares: [] as OfficialFare[], partial: true };
       });
-      return sortOfficialFares([...suburbs, ...express]);
+      return markPartial(sortOfficialFares([...suburbs.fares, ...express.fares]), suburbs.partial || express.partial || expressFailed);
     })();
-    // 실패한 조회는 다음에 다시 시도할 수 있게 기억하지 않는다.
-    pending.catch(() => memory.delete(key));
+    // 실패했거나 일부만 받은 조회는 다음에 다시 시도할 수 있게 기억하지 않는다 (받은 터미널 쌍은 저장돼 있어 다시 부르지 않는다).
+    pending.then((fares) => { if (partialResults.has(fares)) memory.delete(key); }, () => memory.delete(key));
     memory.set(key, pending);
   }
   return pending;

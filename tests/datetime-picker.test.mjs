@@ -136,16 +136,74 @@ test('연도 네 자리와 월 두 자리 입력 시 다음 칸을 자동 선택
   assert.equal(date.getValue(), '');
 });
 
-test('연도를 비우고 월·일만 적으면 올해로 보고, 연도 칸 안내문은 올해다', () => {
+test('연도를 비우고 월·일만 적으면 오늘 기준으로 해를 정하고, 연도 칸 안내문은 올해다', () => {
   resetDocument();
   const date = createDateInput();
   const [year, month, day] = date.root.querySelectorAll('.date-input__part');
   assert.equal(year.placeholder, currentYear);
-  typeInto(month, '10');
-  typeInto(day, '5');
-  assert.equal(date.getValue(), `${currentYear}-10-05`);
+  // 오늘 날짜는 언제 돌려도 올해다 (다른 날짜의 해 고르기는 date-range.test.mjs 의 resolveYearlessDate 에서 본다).
+  typeInto(month, todayValue.slice(5, 7));
+  typeInto(day, todayValue.slice(8, 10));
+  assert.equal(date.getValue(), todayValue);
   typeInto(year, '20');
   assert.equal(date.getValue(), '', '연도를 적는 중간에는 값이 없다');
+});
+
+test('두 자리 연도는 칸을 벗어날 때 20XX 로, 첫 자리가 2 이상인 월은 한 자리 월로 보고 넘어간다', () => {
+  resetDocument();
+  const date = createDateInput();
+  const [year, month, day] = date.root.querySelectorAll('.date-input__part');
+  year.focus();
+  typeInto(year, '26');
+  fire(year, 'blur');
+  assert.equal(year.value, '2026');
+  month.focus();
+  typeInto(month, '3');
+  assert.equal(month.value, '03');
+  assert.equal(document.activeElement, day, '한 자리 월은 바로 일 칸으로 넘어간다');
+  typeInto(day, '15');
+  assert.equal(date.getValue(), '2026-03-15');
+  month.focus();
+  typeInto(month, '1');
+  assert.equal(month.value, '1', '1 은 10~12 월일 수 있어 기다린다');
+  typeInto(month, '13');
+  assert.equal(month.value, '1', '13 월은 없으므로 둘째 자리를 버린다');
+  typeInto(day, '35');
+  assert.equal(day.value, '3', '31 일을 넘는 둘째 자리는 버린다');
+});
+
+test('빈 월 칸에서 친 구분자는 일 칸으로 넘기지 않는다 — 2026.3.15 처럼 쳐도 월이 비지 않는다', () => {
+  resetDocument();
+  const date = createDateInput();
+  const [year, month, day] = date.root.querySelectorAll('.date-input__part');
+  year.focus();
+  typeInto(year, '2026');
+  assert.equal(document.activeElement, month);
+  fire(month, 'keydown', { key: '.', preventDefault() {} });
+  assert.equal(document.activeElement, month);
+  typeInto(month, '3');
+  assert.equal(document.activeElement, day);
+  typeInto(day, '15');
+  assert.equal(date.getValue(), '2026-03-15');
+});
+
+test('숫자는 있는데 날짜가 되지 않으면 묶음을 벗어날 때 빨간 테두리로 알리고, 고치면 지운다', () => {
+  resetDocument();
+  const date = createDateInput();
+  const [year, month, day] = date.root.querySelectorAll('.date-input__part');
+  typeInto(year, '2026');
+  typeInto(month, '02');
+  typeInto(day, '30');
+  fire(date.root, 'focusout', { relatedTarget: null });
+  assert.equal(date.getValue(), '');
+  assert.equal(date.root.classList.contains('is-invalid'), true);
+  typeInto(day, '28');
+  assert.equal(date.root.classList.contains('is-invalid'), false);
+  fire(date.root, 'focusout', { relatedTarget: null });
+  assert.equal(date.root.classList.contains('is-invalid'), false);
+  date.setValue('');
+  fire(date.root, 'focusout', { relatedTarget: null });
+  assert.equal(date.root.classList.contains('is-invalid'), false, '빈 칸은 틀린 날짜가 아니다');
 });
 
 test('달력은 늘 오늘이 있는 달을 먼저 펼치고, 다른 달의 날짜를 골라 두었으면 그 달로 가는 버튼을 보여 준다', () => {
@@ -278,16 +336,28 @@ test('시간 판에서 시를 고르면 정시로 바로 반영하고 분은 이
   assert.deepEqual(changes, ['2026-09-13T13:00', '2026-09-13T13:30']);
 });
 
-test('연도를 비운 날짜는 칸을 벗어날 때 올해로 확정하고 연도 칸을 채운다', () => {
+test('연도를 비운 날짜는 칸을 벗어날 때 해를 정해 확정하고 연도 칸을 채운다', () => {
   const { hidden, date, dateParts: [year, month, day] } = picker('');
   month.focus();
-  typeInto(month, '10');
-  typeInto(day, '05');
+  typeInto(month, todayValue.slice(5, 7));
+  typeInto(day, todayValue.slice(8, 10));
   assert.equal(hidden.value, '', '아직 칸 안에 있으면 반영하지 않는다');
   document.activeElement = null;
   fire(date, 'focusout', { relatedTarget: null });
-  assert.equal(hidden.value, `${currentYear}-10-05T09:00`);
+  assert.equal(hidden.value, `${todayValue}T09:00`);
   assert.equal(year.value, currentYear);
+});
+
+test('두 자리 연도로 친 날짜도 칸을 벗어나면 그 해로 확정된다', () => {
+  const { hidden, date, dateParts: [year, month, day] } = picker('');
+  year.focus();
+  typeInto(year, '26');
+  fire(year, 'blur');
+  typeInto(month, '11');
+  typeInto(day, '14');
+  document.activeElement = null;
+  fire(date, 'focusout', { relatedTarget: null });
+  assert.equal(hidden.value, '2026-11-14T09:00');
 });
 
 test('100년 미만 연도에 1900년을 더하지 않고 자정 보정을 유지한다', () => {

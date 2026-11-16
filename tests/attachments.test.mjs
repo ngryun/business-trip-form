@@ -16,6 +16,15 @@ test('첨부서류는 줄바꿈·쉼표로 나누고 금액의 천 단위 쉼표
   assert.deepEqual(parseAttachmentItems('  \n\n'), []);
 });
 
+test('괄호 안의 쉼표는 나누지 않는다 — 괄호는 줄마다 따로 센다', () => {
+  assert.deepEqual(parseAttachmentItems('영수증(유류비, 통행료) 1부'), ['영수증(유류비, 통행료) 1부']);
+  assert.deepEqual(parseAttachmentItems('「연수, 회의」 결과 1부, 출장신청서 1부'), ['「연수, 회의」 결과 1부', '출장신청서 1부']);
+  assert.deepEqual(parseAttachmentItems('주유영수증 1부\n하이패스영수증 1부, 출장신청서 1부'), ['주유영수증 1부', '하이패스영수증 1부', '출장신청서 1부']);
+  // 닫히지 않은 괄호가 있는 줄은 그 줄만 한 항목으로 남고, 다음 줄은 평소처럼 나뉜다.
+  assert.deepEqual(parseAttachmentItems('영수증(유류비, 통행료 1부\n주유영수증 1부, 출장신청서 1부'), ['영수증(유류비, 통행료 1부', '주유영수증 1부', '출장신청서 1부']);
+  assert.equal(toggleAttachmentItem('영수증(유류비, 통행료) 1부', '출장신청서 1부'), '영수증(유류비, 통행료) 1부\n출장신청서 1부');
+});
+
 test('마지막 줄 끝에 두 칸 띄우고 끝. 을 붙인다', () => {
   assert.deepEqual(attachmentLines('출장신청서 1부'), ['출장신청서 1부  끝.']);
   assert.deepEqual(attachmentLines('주유영수증 1부\n출장신청서 1부'), ['주유영수증 1부', '출장신청서 1부  끝.']);

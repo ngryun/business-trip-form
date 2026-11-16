@@ -109,6 +109,9 @@ export function parseFareRegion(text: string): FareRegion {
     const province = provinceShort(words[0]);
     if (province) return withProvince(province, words.slice(1).join(''));
   } else {
+    // "광주광역시"·"서울특별시"처럼 특별시·광역시 이름을 다 쓰면 그 시다 (그냥 "광주" 는 경기 광주일 수도 있어 아래에서 정한다).
+    const metro = provinceShort(raw);
+    if (metro && metro !== raw && METRO_CITIES.has(metro)) return { 시도: metro, 시군: metro };
     // 띄어 쓰지 않은 "경기광주"·"경상남도고성군" — 뒷부분이 그 시도의 시군일 때만 시도로 본다.
     for (const [short, names] of Object.entries(PROVINCES)) {
       for (const prefix of [...names, short]) {
@@ -190,8 +193,9 @@ const TERMINAL_ALIASES: Record<string, string[]> = {
   '경남 고성': ['고성', '배둔'],
   '광주 광주': ['광주(유·스퀘어)'],
   '경기 광주': ['광주(경기)'],
-  서울: ['동서울', '서울고속버스터미널(경부)', '서울남부', '상봉'],
-  부산: ['부산동부', '노포', '부산서부(사상)', '부산해운대'],
+  // 서울남부·부산서부(사상) 착발 시외버스는 TAGO 에 자료가 없어(2026-11 확인) 부르지 않는다 — 공용 호출 한도만 쓴다.
+  서울: ['동서울', '서울고속버스터미널(경부)', '상봉'],
+  부산: ['부산동부', '노포', '부산해운대'],
   대구: ['대구동부', '대구북부', '대구서부'],
   대전: ['대전복합', '유성복합', '대전서남부'],
   세종: ['세종시', '조치원', '세종청사'],
@@ -222,7 +226,7 @@ export const EXPRESS_TERMINAL_ALIASES: Record<string, string[]> = {
   '경남 고성': [],
   '광주 광주': ['광주(유·스퀘어)', '광주비아'],
   '경기 광주': ['경기광주'],
-  서울: ['동서울', '서울경부', '센트럴시티(서울)', '상봉', '서울남부'],
+  서울: ['동서울', '서울경부', '센트럴시티(서울)', '상봉'],
   부산: ['부산', '부산사상', '동래'],
   대구: ['동대구', '서대구', '대구서부'],
   대전: ['대전복합', '유성복합'],
@@ -258,6 +262,8 @@ export function terminalsForRegion(
   const pool = region.시도 ? terminals.filter((t) => t.시도 === region.시도) : terminals;
   const aliases = terminalAliases(region, aliasTable);
   if (aliases) return aliases.flatMap((name) => pool.filter((t) => t.name === name));
+  // 시도를 모르는 한 글자(입력 중인 "서")로 앞머리가 같은 전국 터미널을 부르지 않는다 — 공용 호출 한도를 쓴다.
+  if (!region.시도 && region.시군.length < 2) return pool.filter((t) => t.name === region.시군);
   const ranked = [
     ...pool.filter((t) => t.name === region.시군),
     ...pool.filter((t) => t.name !== region.시군 && t.name.startsWith(region.시군)),

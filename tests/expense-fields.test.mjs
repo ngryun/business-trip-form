@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { initSync, HwpDocument } from '@rhwp/core';
-import { applyExpenseFields, clearFareRows } from '../src/expense-fields.ts';
+import { applyExpenseFields, clearFareRows, expenseCellsWritable } from '../src/expense-fields.ts';
 
 initSync({ module: readFileSync(new URL('../node_modules/@rhwp/core/rhwp_bg.wasm', import.meta.url)) });
 const template = readFileSync(new URL('../public/templates/business-trip.hwp', import.meta.url));
@@ -68,3 +68,19 @@ for (const deleted of [[], ['갈때'], ['올때'], ['갈때', '올때']]) {
     doc.free();
   });
 }
+
+test('올린 양식의 일반 칸: 내장 양식 구조면 쓸 수 있고, 칸에 글자가 있거나 표를 못 찾으면 쓰지 않는다', () => {
+  // 원본의 총 동승자수 칸에는 "-명" 자리표시가 있다 — 그것까지는 빈 칸으로 본다.
+  assert.equal(expenseCellsWritable(bridge(new HwpDocument(template))), true);
+  const taebaek = readFileSync(new URL('../public/templates/business-trip-taebaek.hwp', import.meta.url));
+  assert.equal(expenseCellsWritable(bridge(new HwpDocument(taebaek))), true);
+
+  // 동승자 소속 자리에 이미 글자가 있는 양식(= 구조가 다른 양식)은 건드리지 않는다.
+  const filled = new HwpDocument(template);
+  applyExpenseFields(bridge(filled), { 동승자1소속: '이미 있는 글자' });
+  assert.equal(expenseCellsWritable(bridge(filled)), false);
+
+  // 소속 누름틀이 든 표가 없으면 쓸 곳을 알 수 없다.
+  const noAnchor = bridge(new HwpDocument(template));
+  assert.equal(expenseCellsWritable(new Proxy(noAnchor, { get: (target, key) => (key === 'getFieldList' ? () => [] : target[key]) })), false);
+});

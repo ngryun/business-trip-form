@@ -64,6 +64,9 @@ const FONT_LIST: FontEntry[] = [
   { name: 'SpoqaHanSans', file: '/fonts/SpoqaHanSans-Regular.woff2' },
   { name: '고운바탕', file: '/fonts/GowunBatang-Regular.woff2' },
   { name: '고운돋움', file: '/fonts/GowunDodum-Regular.woff2' },
+  // 도장 만들기(personal-stamp.js)의 글씨체 — 도장을 그릴 때 document.fonts.load 로 받아 온다.
+  { name: 'Yeon Sung', file: '/fonts/YeonSung-Regular.woff2' },
+  { name: 'Song Myung', file: '/fonts/SongMyung-Regular.woff2' },
 ];
 
 const CRITICAL_FONTS = new Set(['함초롬바탕', '함초롬돋움', 'Noto Sans KR', 'Noto Serif KR']);

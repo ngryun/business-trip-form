@@ -3,10 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Song+Myung&family=Yeon+Sung&display=swap" rel="stylesheet" />
   <title>여비정산신청서 작성</title>
+  <meta name="description" content="HWP 여비정산신청서(출장신청서) 양식을 웹에서 채워 HWP·PDF로 내려받습니다. 설치·회원가입 없이 브라우저에서 바로 씁니다." />
+  <meta name="theme-color" content="#2563eb" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <!-- 메신저·SNS 에 링크를 붙였을 때의 미리보기. og:image 는 절대 주소여야 해서 배포 주소를 적는다. -->
+  <meta property="og:type" content="website" />
+  <meta property="og:locale" content="ko_KR" />
+  <meta property="og:title" content="여비정산신청서 작성" />
+  <meta property="og:description" content="입력하면 HWP 양식에 바로 채워집니다 — HWP 다운로드 · PDF 인쇄 · 운임 자동 입력" />
+  <meta property="og:url" content="https://ngryun.github.io/business-trip-form/" />
+  <meta property="og:image" content="https://ngryun.github.io/business-trip-form/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
   <link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
@@ -21,8 +30,9 @@
         <p class="subtitle">입력하면 미리보기에 바로 반영됩니다. 미리보기에서 누름틀·식비·동승자 칸을 클릭해 바로 고칠 수 있고, 「운 임」 칸을 누르면 행 삭제/복원 메뉴가 열립니다.</p>
       </div>
       <div class="extension-guide">
-        <p>크롬 확장프로그램을 설치하면 <strong>NEIS 개인출장관리 목록</strong>에서 바로 사용할 수 있습니다.</p>
+        <p>크롬 확장프로그램을 설치하면 <strong>강원 NEIS 개인출장관리 목록</strong>에서 바로 사용할 수 있습니다.</p>
         <a class="extension-guide__button" href="https://chromewebstore.google.com/detail/kepkommamckbocpfedbcdnhlchgjpbkp?utm_source=item-share-cb" target="_blank" rel="noopener noreferrer" aria-label="크롬 확장프로그램 설치 (새 탭에서 열림)">크롬 확장프로그램 설치 <span aria-hidden="true">↗</span></a>
+        <button type="button" id="btn-hide-extension-guide" class="extension-guide__close" title="이 브라우저에서는 안내를 다시 보이지 않습니다">안내 닫기</button>
       </div>
     </header>
 
@@ -94,9 +104,24 @@
             <legend>식비</legend>
             <label>지급받은 금액 <input name="식비지급받은금액" type="text" placeholder="예: 2식, 20,000원, 지급 없음" /></label>
           </fieldset>
+
+          <fieldset>
+            <legend>양식</legend>
+            <p id="template-current" class="field-hint" role="status">기본 양식 사용 중</p>
+            <details class="signature-details">
+              <summary>다른 양식 쓰기 (내 HWP 올리기)</summary>
+              <p class="field-hint">기관 양식이 다르면 누름틀이 들어 있는 HWP 파일을 올려 쓸 수 있습니다. 한글에서 누름틀(Ctrl+K, E)의 이름이나 안내문을 소속·직급·성명·시작일시·출장지·갈때일자·갈때교통편·갈때출발지·갈때도착지·올때…·제출날짜·첨부서류로 맞춘 파일이어야 합니다. 파일은 서버로 보내지 않고 이 브라우저에만 저장됩니다.</p>
+              <label class="signature-control">양식 파일 (HWP)
+                <span class="signature-control__row">
+                  <input id="template-file" type="file" accept=".hwp,application/x-hwp,application/haansofthwp,application/vnd.hancom.hwp" />
+                  <button type="button" id="btn-template-reset" class="signature-control__button" hidden>기본 양식으로 되돌리기</button>
+                </span>
+              </label>
+            </details>
+          </fieldset>
           </div>
           <div id="form-panel-fare" class="form-tab-panel" role="tabpanel" aria-labelledby="form-tab-fare" tabindex="0" hidden>
-          <p class="field-hint field-hint--panel">일자는 출장 일시에서 자동 입력되며 직접 수정할 수 있습니다. 출발지·도착지는 갈 때 값이 올 때에 거꾸로 채워집니다. 고성·속초 출발 구간은 고성교육지원청 버스요금표(2026. 1. 13.)로 금액이 자동 입력되고, 국토교통부 시외버스 공식 운임과 다르면 비교 칩이 함께 뜹니다. 요금표에 없는 구간은 공식 운임(시외버스, 일반 등급이 없으면 고속버스도)을 제안합니다. 교통편이 기차/KTX·항공 등이면 버스 운임은 참고용으로만 보여 줍니다. 어느 구간이든 네이버지도 링크에서 요금을 확인할 수 있습니다.</p>
+          <p class="field-hint field-hint--panel">일자는 출장 일시에서 자동 입력되며 직접 수정할 수 있습니다. 올 때 칸은 갈 때 값으로 채워집니다(교통편은 그대로, 출발지·도착지는 거꾸로). 금액은 국토교통부 공식 운임(시외버스, 일반 등급이 없으면 고속버스도)으로 제안하고, 교통편이 기차/KTX·항공 등이면 버스 운임은 참고용으로만 보여 줍니다. 어느 구간이든 네이버지도 링크에서 요금을 확인할 수 있습니다.<span data-fare-table-hint hidden> 이 구간은 고성교육지원청 버스요금표(2026. 1. 13.)에 있어 그 금액이 먼저 들어가고, 공식 운임과 다르면 비교 칩이 함께 뜹니다.</span></p>
           <fieldset>
             <legend>갈 때 운임 <button type="button" data-fare-toggle="갈때" class="fare-toggle" aria-label="갈 때 운임 행 삭제">행 삭제</button></legend>
             <input type="hidden" name="갈때운임삭제" value="0" />

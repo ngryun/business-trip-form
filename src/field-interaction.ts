@@ -248,9 +248,18 @@ export function attachInlineEditing(deps: InlineEditDeps): InlineEditHandle {
     hideHighlight();
   };
 
+  // 다시 그리기(loadDocument 의 scrollTop=0 → reloadPreservingScroll 복원)는 위치가 같아도 scroll 이벤트를 한 번 낸다.
+  // 1px 이상 실제로 움직였을 때만 팝오버를 닫는다 — 그러지 않으면 운임 자동 입력·자동 도장 뒤의 다시 그리기가 열린 칸을 닫아
+  // 치던 글자가 사라진다. 기준점은 움직임을 인정할 때만 옮겨 느린 미세 스크롤도 쌓이게 한다.
+  let lastScrollTop = container.scrollTop;
+  let lastScrollLeft = container.scrollLeft;
   const onScroll = (): void => {
-    // 스크롤 중에는 좌표/팝오버가 흔들리므로 정리
     hideHighlight();
+    const top = container.scrollTop;
+    const left = container.scrollLeft;
+    if (Math.abs(top - lastScrollTop) < 1 && Math.abs(left - lastScrollLeft) < 1) return;
+    lastScrollTop = top;
+    lastScrollLeft = left;
     if (isPopoverOpen()) closeFieldPopover();
   };
 

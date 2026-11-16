@@ -104,3 +104,14 @@ test('지역 → 고속버스 터미널: 같은 이름의 id 를 모두, 앞 이
   assert.deepEqual(pick({ 시도: '강원', 시군: '철원' }).map((t) => t.name), ['신철원', '철원']);
   assert.deepEqual(pick({ 시도: '강원', 시군: '고성' }), []);
 });
+
+test('특별시·광역시 이름을 다 쓰면 그 시로 본다 — 그냥 "광주" 는 동명 지역으로 남는다', () => {
+  assert.deepEqual(parseFareRegion('광주광역시'), { 시도: '광주', 시군: '광주' });
+  assert.deepEqual(parseFareRegion('서울특별시'), { 시도: '서울', 시군: '서울' });
+  assert.deepEqual(parseFareRegion('광주'), { 시도: '', 시군: '광주' });
+  assert.equal(resolveFareRoute('성남', '광주광역시').to.시도, '광주');
+});
+
+test('시도를 모르는 한 글자로는 앞머리가 같은 전국 터미널을 고르지 않는다 (입력 중 호출 낭비)', () => {
+  assert.deepEqual(terminalsForRegion({ 시도: '', 시군: '서' }, terminals).map((t) => t.name).filter((n) => n !== '서'), []);
+});

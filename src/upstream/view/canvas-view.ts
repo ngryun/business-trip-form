@@ -63,7 +63,8 @@ export class CanvasView {
 
     // 모바일: 문서 로드 시 폭 맞춤 줌 자동 적용
     if (window.innerWidth < 1024 && this.pages.length > 0) {
-      const containerWidth = this.container.clientWidth - 20;
+      // [로컬 수정] virtual-scroll 이 좌우 20px 씩 여백을 더하므로 40 을 뺀다 — 휴대폰에서 미리보기가 옆으로 밀리지 않게
+      const containerWidth = this.container.clientWidth - 40;
       const pageWidth = this.pages[0].width;
       if (pageWidth > 0 && containerWidth > 0) {
         const fitZoom = containerWidth / pageWidth;
